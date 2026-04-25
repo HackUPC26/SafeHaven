@@ -17,3 +17,5 @@ mobile/ios/DerivedData/
 mobile/ios/Podfile.lock
 *.xcuserstate
 xcuserdata/
+mobile/ios/mobile.xcodeproj/project.pbxproj
+p2p-hello/package-lock.json

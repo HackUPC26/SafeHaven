@@ -1,9 +1,11 @@
-# SafeHaven — P2P Hello World + WebRTC Streaming
+# SafeHaven — WebRTC Signaling + Receiver Host
 
-This directory contains two things:
+This directory contains the live video/audio streaming pipeline used by the
+SafeHaven mobile app:
 
-1. **Autopass demo** — original Holepunch/Pear DHT pairing proof-of-concept.
-2. **WebRTC signaling server + browser demo** — live video/audio streaming pipeline used by the SafeHaven mobile app.
+1. A lightweight WebSocket signaling server.
+2. A static host for the browser receiver PWA.
+3. A browser sender page for no-phone smoke tests.
 
 ---
 
@@ -27,12 +29,12 @@ iPhone (sender)  ──WebSocket──►  Signaling server  ◄──WebSocket�
 
 ---
 
-### Quick Start — Signaling server
+### Quick Start
 
 ```bash
 cd p2p-hello
 npm install
-node signaling.js        # or: npm run signal
+npm run signal
 ```
 
 Server binds to port **8080** by default (`PORT=<n>` to override).  
@@ -148,30 +150,7 @@ App was built targeting a physical device. Rebuild: `cd mobile && npx expo run:i
 Check `NSCameraUsageDescription` and `NSMicrophoneUsageDescription` in `mobile/ios/mobile/Info.plist`. The Simulator has no real camera — use a physical device for full A/V.
 
 **Signaling WebSocket closes immediately**  
-Verify `node signaling.js` is running and `EXPO_PUBLIC_SIGNAL_HOST` in `mobile/.env` matches the current LAN IP (changes when you switch networks).
+Verify `npm run signal` is running from `p2p-hello/` and `EXPO_PUBLIC_SIGNAL_HOST` in `mobile/.env` matches the current LAN IP (changes when you switch networks).
 
 **Browser sender shows "HTTPS Required"**  
 Open the sender via `http://localhost:8080/sender`, not the LAN IP. The receiver can use either.
-
----
-
-## Autopass Demo (original)
-
-Minimal [Autopass](https://github.com/holepunchto/autopass) demo. One peer creates an Autopass instance and prints a pairing invite. Another peer pairs with that invite and receives `hello world` entries in real time over the Pear DHT — no server, no signalling, no cloud.
-
-### Run
-
-Open two terminals:
-
-```bash
-# Terminal 1 — sender
-node sender.js
-# Copy the printed Invite: string
-
-# Terminal 2 — receiver
-node receiver.js <invite>
-```
-
-Wait for `Paired. Watching for updates...`, then press **Enter** in the sender terminal.
-
-Storage lives in `storage-sender/` and `storage-receiver/`. Delete those to reset.
