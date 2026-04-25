@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SafeHaven — Receiver</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #08080f;
+      color: #e0e0e8;
+      font-family: -apple-system, system-ui, sans-serif;
+      height: 100vh;
+      overflow: hidden;
+    }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // ── iOS 26 Liquid Glass Components ─────────────────────────────────────
+
+    function IOSStatusBar({ dark = false, time = '9:41' }) {
+      const c = dark ? '#fff' : '#000';
+      return (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '14px 24px 10px', boxSizing: 'border-box',
+          position: 'relative', zIndex: 20, width: '100%',
+        }}>
+          <span style={{ fontFamily: '-apple-system, system-ui', fontWeight: 590, fontSize: 17, color: c }}>{time}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+            <svg width="19" height="12" viewBox="0 0 19 12">
+              <rect x="0" y="7.5" width="3.2" height="4.5" rx="0.7" fill={c}/>
+              <rect x="4.8" y="5" width="3.2" height="7" rx="0.7" fill={c}/>
+              <rect x="9.6" y="2.5" width="3.2" height="9.5" rx="0.7" fill={c}/>
+              <rect x="14.4" y="0" width="3.2" height="12" rx="0.7" fill={c}/>
+            </svg>
+            <svg width="17" height="12" viewBox="0 0 17 12">
+              <path d="M8.5 3.2C10.8 3.2 12.9 4.1 14.4 5.6L15.5 4.5C13.7 2.7 11.2 1.5 8.5 1.5C5.8 1.5 3.3 2.7 1.5 4.5L2.6 5.6C4.1 4.1 6.2 3.2 8.5 3.2Z" fill={c}/>
+              <path d="M8.5 6.8C9.9 6.8 11.1 7.3 12 8.2L13.1 7.1C11.8 5.9 10.2 5.1 8.5 5.1C6.8 5.1 5.2 5.9 3.9 7.1L5 8.2C5.9 7.3 7.1 6.8 8.5 6.8Z" fill={c}/>
+              <circle cx="8.5" cy="10.5" r="1.5" fill={c}/>
+            </svg>
+            <svg width="27" height="13" viewBox="0 0 27 13">
+              <rect x="0.5" y="0.5" width="23" height="12" rx="3.5" stroke={c} strokeOpacity="0.35" fill="none"/>
+              <rect x="2" y="2" width="20" height="9" rx="2" fill={c}/>
+              <path d="M25 4.5V8.5C25.8 8.2 26.5 7.2 26.5 6.5C26.5 5.8 25.8 4.8 25 4.5Z" fill={c} fillOpacity="0.4"/>
+            </svg>
+          </div>
+        </div>
+      );
+    }
+
+    function IOSGlassPill({ children, dark = false, style = {} }) {
+      return (
+        <div style={{
+          height: 44, minWidth: 44, borderRadius: 9999,
+          position: 'relative', overflow: 'hidden',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: dark
+            ? '0 2px 6px rgba(0,0,0,0.35), 0 6px 16px rgba(0,0,0,0.2)'
+            : '0 1px 3px rgba(0,0,0,0.07), 0 3px 10px rgba(0,0,0,0.06)',
+          ...style,
+        }}>
+          <div style={{
+            position: 'absolute', inset: 0, borderRadius: 9999,
+            backdropFilter: 'blur(12px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(12px) saturate(180%)',
+            background: dark ? 'rgba(120,120,128,0.28)' : 'rgba(255,255,255,0.5)',
+          }} />
+          <div style={{
+            position: 'absolute', inset: 0, borderRadius: 9999,
+            boxShadow: dark
+              ? 'inset 1.5px 1.5px 1px rgba(255,255,255,0.15), inset -1px -1px 1px rgba(255,255,255,0.08)'
+              : 'inset 1.5px 1.5px 1px rgba(255,255,255,0.7), inset -1px -1px 1px rgba(255,255,255,0.4)',
+            border: dark ? '0.5px solid rgba(255,255,255,0.15)' : '0.5px solid rgba(0,0,0,0.06)',
+          }} />
+          <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', padding: '0 4px' }}>
+            {children}
+          </div>
+        </div>
+      );
+    }
+
+    function IOSDevice({ children, width = 390, height = 780, dark = false }) {
+      const [tick, setTick] = useState(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }));
+      useEffect(() => {
+        const id = setInterval(() => {
+          setTick(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }));
+        }, 10000);
+        return () => clearInterval(id);
+      }, []);
+      return (
+        <div style={{
+          width, height, borderRadius: 52, overflow: 'hidden',
+          position: 'relative', background: dark ? '#000' : '#F2F2F7',
+          boxShadow: '0 48px 96px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.08)',
+          fontFamily: '-apple-system, system-ui, sans-serif',
+          WebkitFontSmoothing: 'antialiased', flexShrink: 0,
+        }}>
+          {/* dynamic island */}
+          <div style={{
+            position: 'absolute', top: 13, left: '50%', transform: 'translateX(-50%)',
+            width: 120, height: 36, borderRadius: 24, background: '#000', zIndex: 50,
+          }} />
+          {/* status bar */}
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 30 }}>
+            <IOSStatusBar dark={dark} time={tick} />
+          </div>
+          {/* content */}
+          <div style={{ height: '100%', overflow: 'hidden' }}>{children}</div>
+          {/* home indicator */}
+          <div style={{
+            position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 60,
+            height: 32, display: 'flex', justifyContent: 'center', alignItems: 'flex-end',
+            paddingBottom: 8, pointerEvents: 'none',
+          }}>
+            <div style={{
+              width: 134, height: 5, borderRadius: 100,
+              background: dark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.22)',
+            }} />
+          </div>
+        </div>
+      );
+    }
+
+    // ── Weather skin (mirrors the sender's App.js) ─────────────────────────
+
+    const HOURS = [
+      {t:'Now',i:'☀️',c:22},{t:'13h',i:'🌤',c:23},{t:'14h',i:'⛅',c:23},
+      {t:'15h',i:'🌥',c:21},{t:'16h',i:'⛅',c:20},{t:'17h',i:'☀️',c:20},
+      {t:'18h',i:'🌇',c:18},{t:'19h',i:'🌙',c:16},
+    ];
+    const DAYS = [
+      {d:'Today',i:'☀️',lo:15,hi:23},{d:'Wed',i:'🌤',lo:14,hi:22},
+      {d:'Thu',i:'⛅',lo:13,hi:20},{d:'Fri',i:'🌧',lo:12,hi:17},
+      {d:'Sat',i:'🌦',lo:14,hi:19},{d:'Sun',i:'☀️',lo:16,hi:24},
+    ];
+    const glass = {
+      background: 'rgba(255,255,255,0.18)',
+      borderRadius: 18,
+      border: '0.5px solid rgba(255,255,255,0.3)',
+    };
+
+    function WeatherSkin({ tier, gps }) {
+      const dotColor = tier >= 3 ? '#ff3b30' : '#ff9500';
+      return (
+        <div style={{
+          background: 'linear-gradient(180deg,#1a6da8 0%,#3a9fd6 35%,#6ac4ee 70%,#a8dff5 100%)',
+          height: '100%', color: 'white',
+          fontFamily: '-apple-system, system-ui',
+          overflowY: 'auto', paddingTop: 60,
+          position: 'relative',
+        }}>
+          {/* tier dot */}
+          {tier > 0 && (
+            <div style={{
+              position: 'absolute', top: 68, right: 20,
+              width: 9, height: 9, borderRadius: '50%',
+              background: dotColor,
+              boxShadow: `0 0 0 2px rgba(0,0,0,0.15), 0 0 8px ${dotColor}`,
+              zIndex: 10,
+            }} />
+          )}
+
+          {/* city + temp */}
+          <div style={{ textAlign: 'center', paddingTop: 16 }}>
+            <div style={{ fontSize: 30, fontWeight: 600 }}>Barcelona</div>
+            <div style={{ fontSize: 88, fontWeight: 200, lineHeight: '96px' }}>22°</div>
+            <div style={{ fontSize: 19, opacity: 0.9 }}>Mostly Sunny</div>
+            <div style={{ fontSize: 17, opacity: 0.75, marginTop: 4 }}>H:24°  L:15°</div>
+          </div>
+
+          {/* GPS pill */}
+          {gps && (
+            <div style={{
+              ...glass, margin: '10px 14px 0',
+              padding: '8px 12px', fontSize: 12, opacity: 0.9,
+            }}>
+              📍 {gps.lat.toFixed(5)}, {gps.lng.toFixed(5)}
+            </div>
+          )}
+
+          {/* hourly */}
+          <div style={{ ...glass, margin: '10px 14px 0', padding: '10px 12px' }}>
+            <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 8, letterSpacing: 0.3 }}>UV INDEX 6 · FEELS LIKE 24°</div>
+            <div style={{ display: 'flex', gap: 6, overflowX: 'auto' }}>
+              {HOURS.map((h, i) => (
+                <div key={i} style={{ minWidth: 46, textAlign: 'center', fontSize: 13 }}>
+                  <div style={{ opacity: 0.85 }}>{h.t}</div>
+                  <div style={{ fontSize: 20, margin: '4px 0' }}>{h.i}</div>
+                  <div>{h.c}°</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 7-day */}
+          <div style={{ ...glass, margin: '10px 14px 0', padding: '10px 12px' }}>
+            <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, letterSpacing: 0.3 }}>7-DAY FORECAST</div>
+            {DAYS.map((d, i) => (
+              <div key={i} style={{
+                display: 'flex', alignItems: 'center', padding: '7px 0',
+                borderTop: i > 0 ? '0.5px solid rgba(255,255,255,0.2)' : 'none',
+                fontSize: 15,
+              }}>
+                <span style={{ flex: 1, fontWeight: 500 }}>{d.d}</span>
+                <span style={{ fontSize: 19, marginRight: 10 }}>{d.i}</span>
+                <span style={{ opacity: 0.65, marginRight: 8 }}>{d.lo}°</span>
+                <div style={{ width: 60, height: 4, borderRadius: 99, background: 'rgba(255,255,255,0.55)', marginRight: 8 }} />
+                <span>{d.hi}°</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ height: 40 }} />
+        </div>
+      );
+    }
+
+    // ── Event timeline ─────────────────────────────────────────────────────
+
+    const EVENT_META = {
+      incident_opened: { icon: '🔴', label: 'Incident opened', color: '#ef4444' },
+      tier_changed:    { icon: '🟠', label: 'Tier escalated',  color: '#f97316' },
+      gps_update:      { icon: '📍', label: 'GPS update',      color: '#3b82f6' },
+      incident_closed: { icon: '✅', label: 'Incident closed', color: '#22c55e' },
+    };
+
+    function EventRow({ ev }) {
+      const meta = EVENT_META[ev.event_type] || { icon: '•', label: ev.event_type, color: '#6b7280' };
+      const t = ev.timestamp_iso
+        ? new Date(ev.timestamp_iso).toLocaleTimeString()
+        : '--:--';
+      return (
+        <div style={{
+          display: 'flex', gap: 12, padding: '12px 0',
+          borderBottom: '1px solid rgba(255,255,255,0.05)',
+        }}>
+          <div style={{ fontSize: 22, flexShrink: 0, lineHeight: 1 }}>{meta.icon}</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: meta.color }}>{meta.label}</div>
+            {ev.tier !== undefined && (
+              <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
+                Tier → <strong style={{ color: '#e0e0e8' }}>{ev.tier}</strong>
+              </div>
+            )}
+            {ev.lat !== undefined && (
+              <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>
+                {ev.lat.toFixed(6)}, {ev.lng.toFixed(6)}
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: '#444', marginTop: 3 }}>{t}</div>
+          </div>
+        </div>
+      );
+    }
+
+    // ── Dashboard ──────────────────────────────────────────────────────────
+
+    function Dashboard() {
+      const [events, setEvents]   = useState([]);
+      const [tier, setTier]       = useState(0);
+      const [gps, setGps]         = useState(null);
+      const [status, setStatus]   = useState('disconnected');
+      const [wsUrl, setWsUrl]     = useState(`ws://${location.hostname}:8080`);
+      const wsRef = useRef(null);
+      const retryRef = useRef(null);
+
+      function connect(url) {
+        clearTimeout(retryRef.current);
+        if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close(); }
+        setStatus('connecting');
+        const ws = new WebSocket(url);
+        wsRef.current = ws;
+        ws.onopen  = () => setStatus('live');
+        ws.onerror = () => setStatus('error');
+        ws.onclose = () => {
+          setStatus('disconnected');
+          retryRef.current = setTimeout(() => connect(url), 3000);
+        };
+        ws.onmessage = (e) => {
+          try {
+            const ev = JSON.parse(e.data);
+            if (!ev.event_type) return;           // skip non-phone messages
+            setEvents(prev => [ev, ...prev.slice(0, 199)]);
+            if (ev.event_type === 'incident_opened' || ev.event_type === 'tier_changed') setTier(ev.tier);
+            if (ev.event_type === 'gps_update') setGps({ lat: ev.lat, lng: ev.lng });
+          } catch {}
+        };
+      }
+
+      useEffect(() => { connect(wsUrl); return () => { clearTimeout(retryRef.current); wsRef.current?.close(); }; }, []);
+
+      const statusColor = { live: '#22c55e', connecting: '#f59e0b', disconnected: '#6b7280', error: '#ef4444' }[status];
+      const tierBg      = tier >= 3 ? '#dc2626' : tier >= 2 ? '#ea580c' : tier >= 1 ? '#d97706' : 'transparent';
+
+      return (
+        <div style={{ display: 'flex', height: '100vh' }}>
+
+          {/* ── Left: phone frame ── */}
+          <div style={{
+            width: 460, flexShrink: 0,
+            background: '#0b0b14',
+            borderRight: '1px solid rgba(255,255,255,0.05)',
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            gap: 20, padding: '20px 0',
+          }}>
+            {/* status row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ width: 8, height: 8, borderRadius: 4, background: statusColor, boxShadow: `0 0 10px ${statusColor}` }} />
+              <span style={{ fontSize: 13, color: '#777', textTransform: 'uppercase', letterSpacing: 1 }}>{status}</span>
+              {tier > 0 && (
+                <span style={{
+                  background: tierBg, color: '#fff', fontSize: 11,
+                  fontWeight: 700, borderRadius: 6, padding: '2px 8px', letterSpacing: 0.5,
+                }}>TIER {tier}</span>
+              )}
+            </div>
+
+            <IOSDevice width={370} height={740} dark={false}>
+              <WeatherSkin tier={tier} gps={gps} />
+            </IOSDevice>
+          </div>
+
+          {/* ── Right: event feed ── */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+            {/* header */}
+            <div style={{
+              padding: '14px 24px',
+              borderBottom: '1px solid rgba(255,255,255,0.05)',
+              display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
+            }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>SafeHaven</div>
+                <div style={{ fontSize: 12, color: '#555', marginTop: 1 }}>Receiver Dashboard</div>
+              </div>
+              <input
+                value={wsUrl}
+                onChange={e => setWsUrl(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && connect(wsUrl)}
+                style={{
+                  background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: 10, padding: '7px 12px', color: '#ccc', fontSize: 13, width: 230,
+                  outline: 'none',
+                }}
+              />
+              <button
+                onClick={() => connect(wsUrl)}
+                style={{
+                  background: '#2563eb', color: '#fff', border: 'none',
+                  borderRadius: 10, padding: '7px 16px', fontSize: 13,
+                  cursor: 'pointer', fontWeight: 600,
+                }}>Connect</button>
+            </div>
+
+            {/* GPS banner */}
+            {gps && (
+              <div style={{
+                padding: '8px 24px', flexShrink: 0,
+                background: 'rgba(37,99,235,0.08)',
+                borderBottom: '1px solid rgba(37,99,235,0.15)',
+                fontSize: 13, color: '#60a5fa',
+                display: 'flex', gap: 12, alignItems: 'center',
+              }}>
+                <span>📍 {gps.lat.toFixed(6)}, {gps.lng.toFixed(6)}</span>
+                <a
+                  href={`https://www.google.com/maps?q=${gps.lat},${gps.lng}`}
+                  target="_blank"
+                  rel="noopener"
+                  style={{ color: '#93c5fd', textDecoration: 'none' }}
+                >Open in Maps ↗</a>
+              </div>
+            )}
+
+            {/* events */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '0 24px' }}>
+              {events.length === 0 ? (
+                <div style={{ padding: '60px 0', textAlign: 'center', color: '#333', fontSize: 14 }}>
+                  Waiting for events from sender…
+                </div>
+              ) : (
+                events.map((ev, i) => <EventRow key={i} ev={ev} />)
+              )}
+            </div>
+          </div>
+
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<Dashboard />);
+  </script>
+</body>
+</html>

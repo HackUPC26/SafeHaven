@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SafeHaven — P2P Spike</title>
+  <style>
+    body { background: #0a0a0f; color: #e0e0e8; font-family: monospace; padding: 24px; }
+    h1 { font-size: 18px; margin-bottom: 8px; }
+    #status { color: #6b7280; font-size: 13px; margin-bottom: 16px; }
+    #key-input { display: flex; gap: 8px; margin-bottom: 20px; }
+    input { background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 8px; padding: 8px 12px; color: #e0e0e8; font-family: monospace;
+            font-size: 13px; width: 520px; outline: none; }
+    button { background: #2563eb; color: #fff; border: none; border-radius: 8px;
+             padding: 8px 16px; font-size: 13px; cursor: pointer; font-weight: 600; }
+    #log { font-size: 12px; line-height: 1.8; }
+    .entry { color: #22c55e; }
+    .info  { color: #60a5fa; }
+    .err   { color: #ef4444; }
+  </style>
+  <script type="module" crossorigin src="/assets/index-BO7QS2AX.js"></script>
+</head>
+<body>
+  <h1>SafeHaven — Browser P2P Spike</h1>
+  <div id="status">Paste the core key from <code>node sender.js</code> and click Connect.</div>
+  <div id="key-input">
+    <input id="key-field" placeholder="64-char hex core key (from sender.js output)" />
+    <button onclick="start()">Connect</button>
+  </div>
+  <div id="log"></div>
+</body>
+</html>

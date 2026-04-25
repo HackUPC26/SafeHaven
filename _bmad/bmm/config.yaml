@@ -3,7 +3,7 @@
 # Version: 6.3.0
 # Date: 2026-04-24T22:02:15.468Z
 
-project_name: hackupc
+project_name: safehaven
 user_skill_level: intermediate
 planning_artifacts: "{project-root}/_bmad-output/planning-artifacts"
 implementation_artifacts: "{project-root}/_bmad-output/implementation-artifacts"
