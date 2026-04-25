@@ -6,7 +6,8 @@
   "description": "Minimal Autopass hello-world for SafeHaven.",
   "scripts": {
     "sender": "node sender.js",
-    "receiver": "node receiver.js"
+    "receiver": "node receiver.js",
+    "signal": "node signaling.js"
   },
   "dependencies": {
     "autopass": "^3.4.1",

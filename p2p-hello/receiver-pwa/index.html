@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1a1a2e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="/manifest.json">
+  <title>SafeHaven</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0 }
+    body {
+      background: #1a1a2e;
+      color: #eee;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      padding: 12px;
+    }
+    h1 { font-size: 18px; font-weight: 600; letter-spacing: 0.05em; color: #e94560 }
+    #video-wrap {
+      position: relative;
+      width: 100%;
+      max-width: 640px;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      aspect-ratio: 4/3;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    #video {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    #placeholder {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      color: rgba(255,255,255,0.25); font-size: 13px;
+      pointer-events: none;
+    }
+    #status {
+      font-size: 13px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.07);
+      display: flex; align-items: center; gap: 6px;
+    }
+    #status::before {
+      content: '';
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: currentColor;
+      display: inline-block;
+    }
+    #status.streaming  { color: #4ade80; background: rgba(74,222,128,0.12) }
+    #status.connecting { color: #fb923c; background: rgba(251,146,60,0.12) }
+    #status.reconnecting { color: #facc15; background: rgba(250,204,21,0.12) }
+    #status.error { color: #f87171; background: rgba(248,113,113,0.12) }
+
+    #token-form {
+      display: flex; gap: 8px; margin-top: 4px;
+    }
+    #token-input {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.15);
+      color: white; padding: 8px 12px;
+      border-radius: 8px; font-size: 13px;
+      width: 220px; outline: none;
+    }
+    #token-input:focus { border-color: #e94560 }
+    button {
+      background: #e94560; color: white;
+      border: none; padding: 8px 16px;
+      border-radius: 8px; cursor: pointer; font-size: 13px;
+    }
+    button:hover { background: #c73652 }
+    #hint { font-size: 11px; color: rgba(255,255,255,0.3); text-align: center }
+  </style>
+</head>
+<body>
+  <h1>SafeHaven</h1>
+
+  <div id="video-wrap">
+    <video id="video" autoplay playsinline></video>
+    <div id="placeholder">Waiting for stream…</div>
+  </div>
+
+  <div id="status" class="connecting">Initializing…</div>
+
+  <div id="token-form" style="display:none">
+    <input id="token-input" placeholder="Paste invite token" autocomplete="off" spellcheck="false">
+    <button onclick="joinWithToken()">Connect</button>
+  </div>
+  <div id="hint"></div>
+
+  <script>
+    const videoEl      = document.getElementById('video')
+    const statusEl     = document.getElementById('status')
+    const placeholderEl= document.getElementById('placeholder')
+    const tokenForm    = document.getElementById('token-form')
+    const tokenInput   = document.getElementById('token-input')
+    const hintEl       = document.getElementById('hint')
+
+    let token = location.hash.slice(1).trim()
+    let ws = null
+    let pc = null
+    let reconnectTimer = null
+    let reconnectDelay = 2000
+    let stopped = false
+
+    const ICE = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ]
+
+    function setStatus(text, cls) {
+      statusEl.textContent = text
+      statusEl.className = cls || ''
+    }
+
+    function joinWithToken() {
+      const t = tokenInput.value.trim()
+      if (!t) return
+      token = t
+      location.hash = token
+      tokenForm.style.display = 'none'
+      hintEl.textContent = ''
+      connect()
+    }
+
+    function connect() {
+      if (stopped || !token) return
+      clearTimeout(reconnectTimer)
+      setStatus('Connecting…', 'connecting')
+
+      const wsProto = location.protocol === 'https:' ? 'wss' : 'ws'
+      const wsUrl = `${wsProto}://${location.host}/ws?role=receiver&token=${encodeURIComponent(token)}`
+      ws = new WebSocket(wsUrl)
+
+      ws.onopen = () => {
+        reconnectDelay = 2000
+        setStatus('Waiting for sender…', '')
+        setupPC()
+      }
+
+      ws.onmessage = async (e) => {
+        let msg
+        try { msg = JSON.parse(e.data) } catch { return }
+
+        if (msg.type === 'offer') {
+          try {
+            await pc.setRemoteDescription({ type: msg.type, sdp: msg.sdp })
+            const answer = await pc.createAnswer()
+            await pc.setLocalDescription(answer)
+            send({ type: 'answer', sdp: answer.sdp })
+          } catch (err) {
+            console.error('offer handling error:', err)
+          }
+        } else if (msg.type === 'ice-candidate' && msg.candidate) {
+          try { await pc.addIceCandidate(msg.candidate) } catch {}
+        } else if (msg.type === 'peer-disconnected') {
+          setStatus('Sender disconnected — waiting…', 'connecting')
+          videoEl.srcObject = null
+          placeholderEl.style.display = 'flex'
+        }
+      }
+
+      ws.onclose = () => {
+        if (stopped) return
+        setStatus(`Reconnecting in ${Math.round(reconnectDelay / 1000)}s…`, 'reconnecting')
+        reconnectTimer = setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 1.5, 30000)
+          connect()
+        }, reconnectDelay)
+      }
+
+      ws.onerror = () => ws.close()
+    }
+
+    function send(obj) {
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj))
+    }
+
+    function setupPC() {
+      if (pc) { try { pc.close() } catch {} pc = null }
+      pc = new RTCPeerConnection({ iceServers: ICE })
+
+      pc.onicecandidate = ({ candidate }) => {
+        if (candidate) send({ type: 'ice-candidate', candidate })
+      }
+
+      pc.ontrack = ({ streams }) => {
+        const stream = streams[0]
+        if (stream && videoEl.srcObject !== stream) {
+          videoEl.srcObject = stream
+          placeholderEl.style.display = 'none'
+          setStatus('● Live', 'streaming')
+        }
+      }
+
+      pc.onconnectionstatechange = () => {
+        const s = pc.connectionState
+        if (s === 'connected')    setStatus('● Live', 'streaming')
+        if (s === 'disconnected') setStatus('Connection unstable…', 'reconnecting')
+        if (s === 'failed') {
+          try { pc.close() } catch {}
+          pc = null
+          setStatus('Reconnecting…', 'reconnecting')
+          reconnectTimer = setTimeout(connect, 2000)
+        }
+      }
+    }
+
+    // Entry point
+    if (token) {
+      hintEl.textContent = `Token: ${token}`
+      connect()
+    } else {
+      setStatus('Enter invite token', '')
+      tokenForm.style.display = 'flex'
+    }
+
+    // Allow pressing Enter in the token input
+    tokenInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') joinWithToken()
+    })
+  </script>
+</body>
+</html>
