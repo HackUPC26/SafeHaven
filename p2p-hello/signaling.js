@@ -8,8 +8,18 @@ import { networkInterfaces } from 'os'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT) || 8080
 
-// token -> { sender: WebSocket|null, receiver: WebSocket|null }
+// token -> { sender: WebSocket|null, receivers: Map<peerId, WebSocket> }
+//
+// Multi-receiver model: one camera (sender), arbitrarily many viewers. Each
+// receiver gets its own peerId and its own SDP exchange with the sender.
+// Messages flowing sender → server are tagged with peerId and routed to the
+// matching receiver; messages flowing receiver → server are auto-tagged with
+// that receiver's peerId before being forwarded to the sender.
 const rooms = new Map()
+
+function makePeerId() {
+  return Math.random().toString(36).slice(2, 10)
+}
 
 const STATIC = {
   '/':            ['receiver-pwa/index.html', 'text/html'],
@@ -67,36 +77,103 @@ wss.on('connection', (ws, req) => {
     ws.close(4000, 'invalid role'); return
   }
 
-  if (!rooms.has(token)) rooms.set(token, { sender: null, receiver: null })
+  if (!rooms.has(token)) rooms.set(token, {
+    sender: null,
+    receivers: new Map(),
+    // Cache the latest snapshot of incident state per room so a viewer that
+    // joins mid-incident immediately sees current tier + GPS instead of
+    // staring at "TIER 0 — Idle" until the next event happens to fire.
+    state: { tierEvent: null, gpsEvent: null },
+  })
   const room = rooms.get(token)
-  const prev = room[role]
-  if (prev?.readyState < 2) prev.close()
-  room[role] = ws
+  const tag = token.slice(0, 8)
 
-  const peer = role === 'sender' ? 'receiver' : 'sender'
-  const tag  = token.slice(0, 8)
-  console.log(`[${tag}] ${role} connected`)
-
-  // If the other side is already present, trigger offer creation
-  if (room[peer]?.readyState === 1) {
-    const target = role === 'receiver' ? room.sender : ws
-    target?.send(JSON.stringify({ type: 'receiver-joined' }))
-  }
-
-  ws.on('message', (data) => {
-    const peerWs = room[peer]
-    if (peerWs?.readyState === 1) peerWs.send(data.toString())
-  })
-
-  ws.on('close', () => {
-    console.log(`[${tag}] ${role} disconnected`)
-    if (room[role] === ws) room[role] = null
-    const peerWs = room[peer]
-    if (peerWs?.readyState === 1) {
-      peerWs.send(JSON.stringify({ type: 'peer-disconnected' }))
+  if (role === 'sender') {
+    // Only one camera per token. A new sender connecting while one is alive
+    // is rejected so the live stream isn't disrupted by accidental dupes.
+    if (room.sender?.readyState === 1) {
+      console.log(`[${tag}] rejecting duplicate sender`)
+      ws.close(4002, 'sender already connected')
+      return
     }
-    if (!room.sender && !room.receiver) rooms.delete(token)
-  })
+    room.sender = ws
+    console.log(`[${tag}] sender connected (receivers: ${room.receivers.size})`)
+
+    // Make the sender open a PC for every receiver already in the room
+    // (covers the case where the sender briefly dropped and reconnected).
+    for (const [peerId, recvWs] of room.receivers) {
+      if (recvWs.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'receiver-joined', peerId }))
+      }
+    }
+
+    ws.on('message', (data) => {
+      let msg
+      try { msg = JSON.parse(data.toString()) } catch { return }
+      // Broadcast events (tier/GPS/AI) — go to every receiver, no peerId routing.
+      if (msg.type === 'event') {
+        // Snapshot the relevant ones so a late-joining viewer can be caught up.
+        const ev = msg.payload
+        if (ev?.event_type === 'tier_changed' || ev?.event_type === 'incident_opened') {
+          room.state.tierEvent = msg
+        } else if (ev?.event_type === 'gps_update') {
+          room.state.gpsEvent = msg
+        }
+        const out = JSON.stringify(msg)
+        for (const recvWs of room.receivers.values()) {
+          if (recvWs.readyState === 1) recvWs.send(out)
+        }
+        return
+      }
+      // SDP/ICE — point-to-point routing by peerId.
+      const recv = msg.peerId && room.receivers.get(msg.peerId)
+      if (recv?.readyState !== 1) return
+      const { peerId, ...forward } = msg
+      recv.send(JSON.stringify(forward))
+    })
+
+    ws.on('close', (code, reason) => {
+      console.log(`[${tag}] sender disconnected code=${code} reason=${reason?.toString() || ''}`)
+      if (room.sender === ws) room.sender = null
+      for (const recvWs of room.receivers.values()) {
+        if (recvWs.readyState === 1) {
+          recvWs.send(JSON.stringify({ type: 'peer-disconnected' }))
+        }
+      }
+      if (!room.sender && room.receivers.size === 0) rooms.delete(token)
+    })
+  } else {
+    const peerId = makePeerId()
+    room.receivers.set(peerId, ws)
+    console.log(`[${tag}] receiver ${peerId} connected (sender present: ${room.sender?.readyState === 1})`)
+
+    // Catch up the new viewer with whatever incident state the room is in.
+    // Replay tier first so the banner colour is correct before GPS lands.
+    if (room.state.tierEvent) ws.send(JSON.stringify(room.state.tierEvent))
+    if (room.state.gpsEvent) ws.send(JSON.stringify(room.state.gpsEvent))
+
+    // If sender is already streaming, ask it to set up a PC for this viewer.
+    if (room.sender?.readyState === 1) {
+      room.sender.send(JSON.stringify({ type: 'receiver-joined', peerId }))
+    }
+
+    ws.on('message', (data) => {
+      let msg
+      try { msg = JSON.parse(data.toString()) } catch { return }
+      if (room.sender?.readyState === 1) {
+        room.sender.send(JSON.stringify({ ...msg, peerId }))
+      }
+    })
+
+    ws.on('close', (code, reason) => {
+      console.log(`[${tag}] receiver ${peerId} disconnected code=${code} reason=${reason?.toString() || ''}`)
+      if (room.receivers.get(peerId) === ws) room.receivers.delete(peerId)
+      if (room.sender?.readyState === 1) {
+        room.sender.send(JSON.stringify({ type: 'peer-disconnected', peerId }))
+      }
+      if (!room.sender && room.receivers.size === 0) rooms.delete(token)
+    })
+  }
 })
 
 function getLocalIP() {

@@ -10,6 +10,7 @@
 // remote WS server.
 
 import { start as startWorklet, appendEntry, joinSwarm, getPubkey } from './worklet-rpc';
+import { sendEvent } from './broadcast';
 
 let connected = false;
 let connecting = null;
@@ -39,12 +40,16 @@ export async function connect() {
 }
 
 export function send(event) {
-  if (!connected) {
-    console.warn('[bridge] send before connect, dropped:', event.event_type);
-    return;
-  }
   const entry = { ...event, timestamp_iso: new Date().toISOString() };
-  appendEntry(entry).catch((err) =>
-    console.warn('[bridge] append failed:', event.event_type, err.message ?? err)
-  );
+  // Hypercore log (durable, P2P fan-out)
+  if (connected) {
+    appendEntry(entry).catch((err) =>
+      console.warn('[bridge] append failed:', event.event_type, err.message ?? err)
+    );
+  } else {
+    console.warn('[bridge] send before worklet ready, dropped to log:', event.event_type);
+  }
+  // Live UX channel — receiver-pwa subscribes here for tier/GPS overlay.
+  // Returns false if the broadcast WS isn't open yet (tier 0 → no broadcast).
+  sendEvent(entry);
 }

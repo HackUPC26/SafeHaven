@@ -63,6 +63,53 @@
     #status.reconnecting { color: #facc15; background: rgba(250,204,21,0.12) }
     #status.error { color: #f87171; background: rgba(248,113,113,0.12) }
 
+    #panel {
+      width: 100%; max-width: 640px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    #tier-banner {
+      padding: 12px 16px; border-radius: 10px;
+      font-size: 14px; font-weight: 600; letter-spacing: 0.04em;
+      text-align: center;
+      background: rgba(255,255,255,0.05);
+      color: rgba(255,255,255,0.5);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+    #tier-banner.t1 { background: rgba(251,146,60,0.15); color: #fb923c; border-color: rgba(251,146,60,0.3) }
+    #tier-banner.t2 { background: rgba(245,158,11,0.18); color: #f59e0b; border-color: rgba(245,158,11,0.35) }
+    #tier-banner.t3 { background: rgba(239,68,68,0.22); color: #fca5a5; border-color: rgba(239,68,68,0.5) }
+
+    #gps-card, #log-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 13px;
+    }
+    .card-label { color: rgba(255,255,255,0.4); font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 4px }
+    #gps-coords { font-family: ui-monospace, Menlo, monospace; color: #cbd5e1 }
+    #gps-link { color: #4a90d9; text-decoration: none; font-size: 12px }
+    #gps-link:hover { text-decoration: underline }
+
+    #log {
+      list-style: none;
+      max-height: 140px; overflow-y: auto;
+      font-family: ui-monospace, Menlo, monospace;
+      font-size: 11px; color: rgba(255,255,255,0.7);
+    }
+    #log li { padding: 2px 0; border-bottom: 1px solid rgba(255,255,255,0.04) }
+    #log li:last-child { border-bottom: none }
+
+    #call-btn {
+      display: none;
+      background: #ef4444; color: white;
+      padding: 14px; border-radius: 12px;
+      font-size: 16px; font-weight: 700;
+      text-align: center; text-decoration: none;
+      box-shadow: 0 0 24px rgba(239,68,68,0.4);
+    }
+    #call-btn.show { display: block }
+
     #token-form {
       display: flex; gap: 8px; margin-top: 4px;
     }
@@ -93,6 +140,20 @@
 
   <div id="status" class="connecting">Initializing…</div>
 
+  <div id="panel">
+    <div id="tier-banner">TIER 0 — Idle</div>
+    <div id="gps-card">
+      <div class="card-label">GPS</div>
+      <div id="gps-coords">—</div>
+      <a id="gps-link" href="#" target="_blank" rel="noopener" style="display:none">Open in Maps ↗</a>
+    </div>
+    <a id="call-btn" href="#">📞 Call Police with Location</a>
+    <div id="log-card">
+      <div class="card-label">Event log</div>
+      <ul id="log"></ul>
+    </div>
+  </div>
+
   <div id="token-form" style="display:none">
     <input id="token-input" placeholder="Paste invite token" autocomplete="off" spellcheck="false">
     <button onclick="joinWithToken()">Connect</button>
@@ -106,6 +167,63 @@
     const tokenForm    = document.getElementById('token-form')
     const tokenInput   = document.getElementById('token-input')
     const hintEl       = document.getElementById('hint')
+    const tierEl       = document.getElementById('tier-banner')
+    const gpsCoordsEl  = document.getElementById('gps-coords')
+    const gpsLinkEl    = document.getElementById('gps-link')
+    const callBtn      = document.getElementById('call-btn')
+    const logEl        = document.getElementById('log')
+
+    let lastGps = null
+
+    const TIER_LABELS = {
+      0: 'TIER 0 — Idle',
+      1: '● TIER 1 — Audio + GPS active',
+      2: '● TIER 2 — Audio + GPS + Video',
+      3: '● TIER 3 — EMERGENCY',
+    }
+
+    function setTier(t) {
+      tierEl.textContent = TIER_LABELS[t] ?? `TIER ${t}`
+      tierEl.className = t > 0 ? `t${t}` : ''
+      if (t >= 3) {
+        const href = lastGps
+          ? `tel:911`  // tel:// can't carry coords; user copies from GPS card
+          : 'tel:911'
+        callBtn.href = href
+        callBtn.classList.add('show')
+      } else {
+        callBtn.classList.remove('show')
+      }
+    }
+
+    function pushLog(line) {
+      const li = document.createElement('li')
+      const t = new Date().toLocaleTimeString()
+      li.textContent = `[${t}] ${line}`
+      logEl.prepend(li)
+      while (logEl.children.length > 30) logEl.lastChild.remove()
+    }
+
+    function handleEvent(payload) {
+      if (!payload) return
+      const t = payload.event_type
+      if (t === 'incident_opened' || t === 'tier_changed') {
+        setTier(payload.tier ?? 0)
+        pushLog(`${t} → tier ${payload.tier}`)
+      } else if (t === 'gps_update') {
+        const lat = Number(payload.lat).toFixed(5)
+        const lng = Number(payload.lng).toFixed(5)
+        lastGps = { lat: payload.lat, lng: payload.lng }
+        gpsCoordsEl.textContent = `${lat}, ${lng}`
+        gpsLinkEl.href = `https://maps.google.com/?q=${payload.lat},${payload.lng}`
+        gpsLinkEl.style.display = 'inline-block'
+        pushLog(`gps ${lat}, ${lng}`)
+      } else if (t === 'ai_label') {
+        pushLog(`ai: ${payload.label ?? JSON.stringify(payload)}`)
+      } else {
+        pushLog(`${t} ${JSON.stringify(payload).slice(0, 80)}`)
+      }
+    }
 
     let token = location.hash.slice(1).trim()
     let ws = null
@@ -141,10 +259,12 @@
 
       const wsProto = location.protocol === 'https:' ? 'wss' : 'ws'
       const wsUrl = `${wsProto}://${location.host}/ws?role=receiver&token=${encodeURIComponent(token)}`
+      console.log('[recv] opening', wsUrl, 'token len:', token.length)
       ws = new WebSocket(wsUrl)
 
       ws.onopen = () => {
         reconnectDelay = 2000
+        console.log('[recv] ws OPEN')
         setStatus('Waiting for sender…', '')
         setupPC()
       }
@@ -154,6 +274,9 @@
         try { msg = JSON.parse(e.data) } catch { return }
 
         if (msg.type === 'offer') {
+          // Recreate the PC for every offer so a sender reconnect (which
+          // pushes a fresh offer) doesn't try to renegotiate on stale ICE.
+          setupPC()
           try {
             await pc.setRemoteDescription({ type: msg.type, sdp: msg.sdp })
             const answer = await pc.createAnswer()
@@ -168,10 +291,13 @@
           setStatus('Sender disconnected — waiting…', 'connecting')
           videoEl.srcObject = null
           placeholderEl.style.display = 'flex'
+        } else if (msg.type === 'event') {
+          handleEvent(msg.payload)
         }
       }
 
-      ws.onclose = () => {
+      ws.onclose = (e) => {
+        console.warn('[recv] ws CLOSE', { code: e.code, reason: e.reason, wasClean: e.wasClean })
         if (stopped) return
         setStatus(`Reconnecting in ${Math.round(reconnectDelay / 1000)}s…`, 'reconnecting')
         reconnectTimer = setTimeout(() => {
@@ -180,7 +306,7 @@
         }, reconnectDelay)
       }
 
-      ws.onerror = () => ws.close()
+      ws.onerror = (e) => { console.error('[recv] ws ERROR', e); ws.close() }
     }
 
     function send(obj) {

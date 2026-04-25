@@ -4,6 +4,9 @@ node_modules/
 .env
 .env.local
 
+# JetBrains IDEs
+.idea/
+
 # macOS
 .DS_Store
 

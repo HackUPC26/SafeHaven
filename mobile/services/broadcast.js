@@ -24,34 +24,76 @@ const ICE_SERVERS = [
 
 const s = {
   ws: null,
-  pc: null,
+  pcs: new Map(), // peerId -> RTCPeerConnection (one per viewer)
   stream: null,
   token: null,
   onState: null,
   active: false,
   reconnectTimer: null,
   reconnectDelay: 2000,
+  // Events emitted while the WS is still connecting are buffered here and
+  // flushed on open. Without this, the very first tier_changed (e.g. tier 1)
+  // is lost because broadcast() is started by the same render that fires the
+  // event — the WS hasn't even been constructed yet.
+  pending: [],
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
-export function startBroadcast(token, onState) {
+export async function startBroadcast(token, onState) {
+  // Idempotent: a re-entry with the same token (e.g. tier 2 → 3) must not
+  // open a second sender socket — the signaling server kicks the previous
+  // one for that role, which then races its own reconnect timer.
+  if (s.active && s.token === token) {
+    if (onState) s.onState = onState
+    return
+  }
+  if (s.active) _cleanup()
   s.token = token
   s.onState = onState
   s.active = true
   s.reconnectDelay = 2000
+  // Acquire media BEFORE opening the WS so we never race with `receiver-joined`
+  // arriving while getUserMedia is still pending. (Previously the first viewer
+  // of a fresh sender got an offer with zero tracks.)
+  _setState('connecting')
+  await _acquireMedia()
+  if (!s.active) return
   _connect()
 }
 
 export function stopBroadcast() {
   s.active = false
   clearTimeout(s.reconnectTimer)
+  s.pending = []
   _cleanup()
   s.onState?.('idle')
 }
 
 export function getLocalStream() {
   return s.stream
+}
+
+// Event channel piggybacked on the sender's signaling WS. The signaling
+// server fans these out to every receiver in the room. Used by the bridge
+// to surface tier/GPS/AI events on the demo viewer in real time — Hypercore
+// is still the source of truth (event log), this is the live UX channel.
+//
+// Events emitted while the WS is connecting (or briefly between reconnects)
+// are buffered and flushed on the next open — without this, the event that
+// triggered the broadcast in the first place (e.g. tier 1 incident_opened)
+// is lost because it fires synchronously with the React state change.
+export function sendEvent(payload) {
+  const msg = JSON.stringify({ type: 'event', payload })
+  if (s.ws?.readyState === WebSocket.OPEN) {
+    s.ws.send(msg)
+    return true
+  }
+  if (s.active) {
+    s.pending.push(msg)
+    return true
+  }
+  return false
 }
 
 // ─── Signaling connection ─────────────────────────────────────────────────────
@@ -64,49 +106,59 @@ function _connect() {
     `${SIGNAL_WS}/ws?role=sender&token=${encodeURIComponent(s.token)}`
   )
 
-  s.ws.onopen = async () => {
+  s.ws.onopen = () => {
     s.reconnectDelay = 2000
-    // Acquire media right away — camera opens before any receiver joins so
-    // there is zero extra latency once the receiver connects.
-    const ok = await _acquireMedia()
-    if (ok) _setState('ready')
+    // Media was already acquired in startBroadcast(). If it failed back then
+    // we wouldn't have a stream — surface that as permission-error.
+    if (!s.stream) { _setState('permission-error'); return }
+    _setState('ready')
+    // Flush any events buffered while the WS was opening (or while we were
+    // briefly between reconnects). This is the path that delivers tier 1's
+    // incident_opened to the viewer.
+    if (s.pending.length) {
+      for (const msg of s.pending) s.ws.send(msg)
+      s.pending = []
+    }
   }
 
   s.ws.onmessage = async (e) => {
     let msg
     try { msg = JSON.parse(e.data) } catch { return }
+    const { peerId } = msg
 
     switch (msg.type) {
       case 'receiver-joined':
-        // A receiver has connected using our token — set up the peer
-        // connection and push an offer immediately.
-        _setupPC()
-        await _createOffer()
+        // A new viewer joined under this peerId — set up a dedicated PC and
+        // push an offer just to them. Other viewers are unaffected.
+        if (peerId) await _setupPeer(peerId)
         break
 
-      case 'answer':
+      case 'answer': {
+        const pc = peerId && s.pcs.get(peerId)
+        if (!pc) break
         try {
-          await s.pc?.setRemoteDescription(
-            new RTCSessionDescription({ type: 'answer', sdp: msg.sdp })
-          )
+          await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: msg.sdp }))
         } catch (err) {
           console.error('[broadcast] setRemoteDescription:', err)
         }
         break
+      }
 
-      case 'ice-candidate':
-        if (msg.candidate) {
-          try { await s.pc?.addIceCandidate(new RTCIceCandidate(msg.candidate)) } catch {}
+      case 'ice-candidate': {
+        const pc = peerId && s.pcs.get(peerId)
+        if (pc && msg.candidate) {
+          try { await pc.addIceCandidate(new RTCIceCandidate(msg.candidate)) } catch {}
         }
         break
+      }
 
-      case 'peer-disconnected':
-        // Receiver left; go back to ready so the next receiver can join
-        // without the sender needing to do anything.
-        try { s.pc?.close() } catch {}
-        s.pc = null
-        _setState('ready')
+      case 'peer-disconnected': {
+        const pc = peerId && s.pcs.get(peerId)
+        if (pc) { try { pc.close() } catch {} }
+        if (peerId) s.pcs.delete(peerId)
+        if (s.pcs.size === 0) _setState('ready')
         break
+      }
     }
   }
 
@@ -158,42 +210,38 @@ async function _acquireMedia() {
   }
 }
 
-// ─── WebRTC peer connection ───────────────────────────────────────────────────
+// ─── WebRTC peer connection (one per viewer) ──────────────────────────────────
 
-function _setupPC() {
-  if (s.pc) { try { s.pc.close() } catch {} s.pc = null }
+async function _setupPeer(peerId) {
+  // Tear down any prior PC for this peer (e.g. they reconnected).
+  const prev = s.pcs.get(peerId)
+  if (prev) { try { prev.close() } catch {} }
 
-  s.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+  s.pcs.set(peerId, pc)
 
-  // Add already-acquired tracks — no getUserMedia delay here
-  s.stream?.getTracks().forEach(track => s.pc.addTrack(track, s.stream))
+  s.stream?.getTracks().forEach(track => pc.addTrack(track, s.stream))
 
-  s.pc.onicecandidate = ({ candidate }) => {
+  pc.onicecandidate = ({ candidate }) => {
     if (candidate && s.ws?.readyState === WebSocket.OPEN) {
-      _send({ type: 'ice-candidate', candidate })
+      _send({ type: 'ice-candidate', peerId, candidate })
     }
   }
 
-  s.pc.onconnectionstatechange = () => {
-    const cs = s.pc?.connectionState
-    if (cs === 'connected')    _setState('streaming')
-    if (cs === 'disconnected') _setState('reconnecting')
+  pc.onconnectionstatechange = () => {
+    const cs = pc.connectionState
+    if (cs === 'connected') _setState('streaming')
     if (cs === 'failed') {
-      try { s.pc.close() } catch {}
-      s.pc = null
-      clearTimeout(s.reconnectTimer)
-      s.reconnectTimer = setTimeout(_connect, 2000)
-      _setState('reconnecting')
+      try { pc.close() } catch {}
+      s.pcs.delete(peerId)
+      if (s.pcs.size === 0) _setState('ready')
     }
   }
-}
 
-async function _createOffer() {
-  if (!s.pc) return
   try {
-    const offer = await s.pc.createOffer()
-    await s.pc.setLocalDescription(offer)
-    _send({ type: 'offer', sdp: offer.sdp })
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
+    _send({ type: 'offer', peerId, sdp: offer.sdp })
   } catch (err) {
     console.error('[broadcast] createOffer:', err)
   }
@@ -213,8 +261,8 @@ function _setState(state) {
 function _cleanup() {
   try { s.stream?.getTracks().forEach(t => t.stop()) } catch {}
   s.stream = null
-  try { s.pc?.close() } catch {}
-  s.pc = null
+  for (const pc of s.pcs.values()) { try { pc.close() } catch {} }
+  s.pcs.clear()
   try { s.ws?.close() } catch {}
   s.ws = null
 }

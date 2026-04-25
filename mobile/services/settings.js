@@ -7,7 +7,7 @@ const KEYS = {
   PAIRING_ID: '@safehaven:pairingId',
 };
 
-const DEFAULT_CODEWORDS = { TIER1: 'sunny', TIER2: 'cloudy', TIER3: 'storm' };
+const DEFAULT_CODEWORDS = { TIER1: 'sunny', TIER2: 'cloudy', TIER3: 'stormy' };
 
 function randomHex32() {
   return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
