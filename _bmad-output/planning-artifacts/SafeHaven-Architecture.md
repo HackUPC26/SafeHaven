@@ -11,35 +11,155 @@ SafeHaven is a fully serverless P2P safety system built on the Pear protocol (Hy
 ```mermaid
 graph TB
     subgraph iPhone["iPhone — Sender App (bare-expo)"]
-        UI["React Native UI\n(Expo / Hermes)\nDisguise skin · Tier display\nOnboarding · QR generation"]
+        UI["React Native UI<br/>(Expo / Hermes)<br/>Disguise skin · Tier display<br/>Onboarding · QR generation"]
         RPC["bare-rpc IPC"]
-        BW["Bare Worklet\n(react-native-bare-kit)\nHypercore · Corestore\nHyperswarm DHT"]
-        NM["Native Modules\nexpo-camera · expo-av\nexpo-location\nCoreML (custom)\nBack Tap (custom)"]
+        BW["Bare Worklet<br/>(react-native-bare-kit)<br/>Hypercore · Corestore<br/>Hyperswarm DHT"]
+        NM["Native Modules<br/>expo-camera · expo-av<br/>expo-location<br/>CoreML (custom)<br/>Back Tap (custom)"]
     end
 
     subgraph Browser["Browser — Receiver PWA"]
-        BPWA["Static PWA Shell\n(downloaded once)"]
-        BDHT["hyperdht browser.js\nhypercore browser bundle\nWebRTC data channels"]
-        BRENDER["Renderer\nVideo · Audio labels\nGPS map · Timeline\nRisk banner · Actions"]
+        BPWA["Static PWA Shell<br/>(downloaded once)"]
+        BDHT["hyperdht browser.js<br/>hypercore browser bundle<br/>WebRTC data channels"]
+        BRENDER["Renderer<br/>Video · Audio labels<br/>GPS map · Timeline<br/>Risk banner · Actions"]
     end
 
     subgraph Infra["Public Infrastructure (Holepunch)"]
-        BOOT["DHT Bootstrap Nodes\nnode1/2/3.hyperdht.org\n(peer discovery only —\nno incident data)"]
+        BOOT["DHT Bootstrap Nodes<br/>node1/2/3.hyperdht.org<br/>(peer discovery only —<br/>no incident data)"]
     end
 
     subgraph Static["Static Host (CDN / GitHub Pages)"]
-        FILES["PWA Bundle\nHTML · CSS · JS\n(no incident data ever)"]
+        FILES["PWA Bundle<br/>HTML · CSS · JS<br/>(no incident data ever)"]
     end
 
     UI <-->|bare-rpc IPC| RPC
     RPC <-->|bare-rpc IPC| BW
     NM -->|media chunks + GPS + AI results| BW
-    BW <-->|Hyperswarm DHT\nNoise-encrypted| BOOT
-    BDHT <-->|WebRTC data channels\nNoise-encrypted| BOOT
-    BW <-->|Hypercore replication\nP2P direct| BDHT
+    BW <-->|Hyperswarm DHT - Noise-encrypted| BOOT
+    BDHT <-->|WebRTC data channels - Noise-encrypted| BOOT
+    BW <-->|Hypercore replication - P2P direct| BDHT
     BDHT --> BRENDER
     FILES -->|one-time bundle download| BPWA
     BPWA --> BDHT
+```
+
+### Detailed Component Diagram
+
+```mermaid
+graph TB
+    subgraph IPHONE["📱 iPhone — Sender App (bare-expo)"]
+        subgraph RNLAYER["React Native UI Layer  (Hermes JS Engine)"]
+            DS["DisguiseShell<br/>WeatherSkin · PodcastSkin"]
+            TSM["TierStateMachine<br/>IDLE → T1 → T2 → T3"]
+            CWL["CodewordListener<br/>SFSpeechRecognizer<br/>on-device model"]
+            OB["OnboardingFlow<br/>QRGenerator · ContactSetup<br/>ShortcutGuide"]
+            SS["SettingsScreen<br/>long-press hidden access"]
+        end
+
+        BRPC(["bare-rpc IPC<br/>← BareKit IPC stream →"])
+
+        subgraph BWLAYER["Bare Worklet  (Bare JS Runtime — NOT Hermes)"]
+            RPCB["rpc-bridge.mjs<br/>command + data router"]
+            IC["incident-core.mjs<br/>Corestore<br/>Hypercore (writer)"]
+            SWM["swarm-manager.mjs<br/>Hyperswarm · HyperDHT<br/>announce on incident topic"]
+            EW["entry-writer.mjs<br/>JSON envelope<br/>append + encrypt"]
+            MCH["media-chunker.mjs<br/>chunk audio + video<br/>≤2s per entry"]
+        end
+
+        subgraph NMLAYER["Native Modules  (Swift)"]
+            CAM["expo-camera<br/>AVCaptureSession<br/>H.264 frames"]
+            AUD["expo-av<br/>AVAudioEngine<br/>AAC chunks"]
+            GPS["expo-location<br/>CLLocationManager<br/>5s poll"]
+            AIMOD["SafeHavenAI (custom)<br/>SoundAnalysis<br/>Vision Framework"]
+            TRIG["SafeHavenTrigger (custom)<br/>Back Tap · Action Button"]
+        end
+
+        subgraph CML["CoreML  /  Neural Engine"]
+            SNA["SNClassifySoundRequest<br/>built-in sound classifier"]
+            VNN["VNDetectHumanBodyPoseRequest<br/>VNRecognizeObjectsRequest"]
+            ATE["Auto-Trigger Engine<br/>confidence ≥0.75<br/>cooldown 15s"]
+        end
+    end
+
+    subgraph STATIC["Static Host  (CDN / GitHub Pages)"]
+        CDN["PWA Bundle<br/>HTML · CSS · JS<br/>never sees incident data"]
+    end
+
+    subgraph NET["Holepunch Public Infrastructure"]
+        BOOT["DHT Bootstrap Nodes<br/>node1/2/3.hyperdht.org<br/>peer discovery only<br/>no incident data"]
+    end
+
+    subgraph BROW["🌐 Browser PWA — Trusted Contact  (any device, no install)"]
+        BINIT["Init Module<br/>URL fragment → pubkey + encKey<br/>client-side only"]
+        BDHT["hyperdht browser.js<br/>DHTclient<br/>WebRTC data channel<br/>Noise handshake"]
+        BHYP["hypercore browser bundle<br/>Replication protocol<br/>entry stream consumer"]
+        BDISP["Entry Dispatcher<br/>routes by entry.type"]
+
+        subgraph BREND["Renderer Components"]
+            BVP["VideoPlayer<br/>MSE SourceBuffer<br/>freeze-frame + staleness badge"]
+            BALR["AudioLabelRail<br/>scrolling · timestamped<br/>red · amber · grey"]
+            BGMAP["GPSMap  (Leaflet)<br/>pin + movement trail<br/>address label"]
+            BITL["IncidentTimeline<br/>colour-coded events<br/>tier changes + AI triggers"]
+            BRB["RiskBanner<br/>Green · Amber · Red<br/>actionable guidance text"]
+            BSH["SessionHeader<br/>name · tier badge<br/>duration · P2P status"]
+        end
+
+        subgraph BACT["Action Components"]
+            BCPB["Call Police with Location<br/>tel: + live GPS<br/>always visible · always red"]
+            BSEV["Save Evidence<br/>IndexedDB → ZIP download<br/>timeline + media + AI + GPS + PDF"]
+        end
+
+        BIDB[("IndexedDB<br/>entries store<br/>media store")]
+    end
+
+    %% ── RN UI internal wiring ──
+    CWL -->|tier trigger| TSM
+    TRIG -->|hardware trigger| TSM
+    TSM -->|tier_change cmd| BRPC
+    OB -->|pubkey + encKey| DS
+
+    %% ── RN ↔ Bare Worklet ──
+    BRPC <-->|commands + data| RPCB
+    CAM -->|H.264 frames| BRPC
+    AUD -->|AAC buffers| BRPC
+    GPS -->|coordinates| BRPC
+    AIMOD -->|label events + auto-trigger| BRPC
+
+    %% ── CoreML internals ──
+    AUD -->|PCM buffers| SNA
+    CAM -->|video frames| VNN
+    SNA -->|sound events| ATE
+    SNA -->|labels| AIMOD
+    VNN -->|annotations| AIMOD
+    ATE -->|escalate tier| TSM
+
+    %% ── Bare Worklet internals ──
+    RPCB -->|media buffers| MCH
+    RPCB -->|GPS · tier · AI events| EW
+    MCH -->|chunks| EW
+    EW -->|append entry| IC
+    IC <-->|replication stream| SWM
+
+    %% ── P2P network ──
+    SWM <-->|announce + holepunch| BOOT
+    BDHT <-->|discover + holepunch| BOOT
+    IC <-.->|Hypercore replication - Noise-encrypted - WebRTC data channel| BHYP
+
+    %% ── Static delivery ──
+    CDN -->|one-time bundle| BINIT
+
+    %% ── Browser internals ──
+    BINIT --> BDHT
+    BDHT --> BHYP
+    BHYP --> BDISP
+    BHYP -->|cache all entries| BIDB
+    BDISP --> BVP
+    BDISP --> BALR
+    BDISP --> BGMAP
+    BDISP --> BITL
+    BDISP --> BRB
+    BDISP --> BSH
+    BGMAP -->|live GPS coords| BCPB
+    BIDB -->|full session| BSEV
 ```
 
 ---
