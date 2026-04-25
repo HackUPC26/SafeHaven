@@ -1,56 +1,37 @@
-const Corestore = require('corestore')
-const Hyperswarm = require('hyperswarm')
-const Autobase = require('autobase')
-const readline = require('readline')
+import Corestore from 'corestore'
+import Autopass from 'autopass'
+import readline from 'readline'
+import process from 'process'
 
 async function main () {
   const store = new Corestore('./storage-sender')
-  await store.ready()
+  const pass = new Autopass(store)
+  await pass.ready()
 
-  const base = new Autobase(store, null, {
-    valueEncoding: 'json',
-    open: (viewStore) => viewStore.get('messages', { valueEncoding: 'json' }),
-    apply: async (nodes, view) => {
-      for (const node of nodes) {
-        await view.append(node.value)
-      }
-    }
-  })
-
-  await base.ready()
+  const invite = await pass.createInvite()
 
   console.log('=== SENDER ===')
-  console.log('Bootstrap key:', base.key.toString('hex'))
-  console.log('Share that key with the receiver (node receiver.js <key>).')
-  console.log('Press ENTER to append "hello world". Ctrl+C to quit.')
+  console.log('Invite:', invite)
+  console.log('Share that with the receiver: node receiver.js <invite>')
+  console.log('Press ENTER to add a "hello world" entry. Ctrl+C to quit.')
   console.log()
 
-  const swarm = new Hyperswarm()
-  swarm.on('connection', (conn, info) => {
-    const remote = info.publicKey.toString('hex').slice(0, 8)
-    console.log('[peer connected]', remote)
-    store.replicate(conn)
-    conn.on('close', () => console.log('[peer disconnected]', remote))
-    conn.on('error', (e) => console.log('[peer error]', remote, e.message))
+  pass.on('update', () => {
+    console.log('[update] writers/entries changed')
   })
 
-  swarm.join(base.discoveryKey, { server: true, client: true })
-  await swarm.flush()
-  console.log('Swarming on discovery key. Waiting for receiver...')
-  console.log()
-
+  let counter = 0
   const rl = readline.createInterface({ input: process.stdin })
   rl.on('line', async () => {
-    const msg = { text: 'hello world', time: new Date().toISOString() }
-    await base.append(msg)
-    console.log('[sent]', msg)
+    const key = `hello-${counter++}`
+    const value = JSON.stringify({ text: 'hello world', time: new Date().toISOString() })
+    await pass.add(key, value)
+    console.log('[sent]', key, value)
   })
 
   process.on('SIGINT', async () => {
     console.log('\nShutting down...')
-    await swarm.destroy()
-    await base.close()
-    await store.close()
+    await pass.close()
     process.exit(0)
   })
 }

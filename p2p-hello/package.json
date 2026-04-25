@@ -2,14 +2,14 @@
   "name": "safehaven-p2p-hello",
   "version": "0.0.1",
   "private": true,
-  "description": "Minimal Autobase + Hyperswarm hello-world for SafeHaven.",
+  "type": "module",
+  "description": "Minimal Autopass hello-world for SafeHaven.",
   "scripts": {
     "sender": "node sender.js",
     "receiver": "node receiver.js"
   },
   "dependencies": {
-    "autobase": "^7.14.0",
-    "corestore": "^7.4.5",
-    "hyperswarm": "^4.11.7"
+    "autopass": "^3.4.1",
+    "corestore": "^7.4.5"
   }
 }

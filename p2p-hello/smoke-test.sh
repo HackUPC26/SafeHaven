@@ -1,5 +1,5 @@
 #!/bin/bash
-# Smoke test: sender -> receiver via DHT. Used to verify the P2P path works.
+# Smoke test: sender -> receiver via Autopass over the DHT.
 set -e
 cd "$(dirname "$0")"
 
@@ -14,27 +14,30 @@ exec 3<> sender.fifo
 node sender.js < sender.fifo > sender.out 2>&1 &
 SENDER_PID=$!
 
-# Wait for bootstrap key to appear.
+# Wait for invite to appear.
 for i in {1..40}; do
-  if grep -q 'Bootstrap key:' sender.out 2>/dev/null; then break; fi
+  if grep -q '^Invite:' sender.out 2>/dev/null; then break; fi
   sleep 0.25
 done
-BOOTSTRAP_KEY=$(grep 'Bootstrap key:' sender.out | awk '{print $3}')
-echo "bootstrap=$BOOTSTRAP_KEY"
+INVITE=$(grep '^Invite:' sender.out | awk '{print $2}')
+echo "invite=$INVITE"
 
-# Wait for sender to finish swarming.
-for i in {1..40}; do
-  if grep -q 'Waiting for receiver' sender.out 2>/dev/null; then break; fi
-  sleep 0.25
-done
+if [ -z "$INVITE" ]; then
+  echo "no invite, sender output:"
+  cat sender.out
+  kill "$SENDER_PID" 2>/dev/null || true
+  exec 3>&-
+  rm -f sender.fifo
+  exit 1
+fi
 
-node receiver.js "$BOOTSTRAP_KEY" > receiver.out 2>&1 &
+node receiver.js "$INVITE" > receiver.out 2>&1 &
 RECEIVER_PID=$!
 
-# Wait for peers to connect on both sides.
-for i in {1..80}; do
-  if grep -q 'peer connected' sender.out && grep -q 'peer connected' receiver.out; then break; fi
-  sleep 0.25
+# Wait for receiver to finish pairing.
+for i in {1..120}; do
+  if grep -q 'Paired' receiver.out 2>/dev/null; then break; fi
+  sleep 0.5
 done
 
 # Press "Enter" in sender three times with pauses.

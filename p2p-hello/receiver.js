@@ -1,71 +1,44 @@
-const Corestore = require('corestore')
-const Hyperswarm = require('hyperswarm')
-const Autobase = require('autobase')
+import Autopass from 'autopass'
+import Corestore from 'corestore'
 
-async function main () {
-  const bootstrapHex = process.argv[2]
-  if (!bootstrapHex) {
-    console.error('Usage: node receiver.js <bootstrap-key-hex>')
-    process.exit(1)
-  }
-  const bootstrapKey = Buffer.from(bootstrapHex, 'hex')
+async function main() {
+    const store = new Corestore('./storage-receiver')
+    const key = process.argv[2]
+    const pair = Autopass.pair(store, key)
 
-  const store = new Corestore('./storage-receiver')
-  await store.ready()
+    const pass = await pair.finished()
+    await pass.ready()
 
-  const base = new Autobase(store, bootstrapKey, {
-    valueEncoding: 'json',
-    open: (viewStore) => viewStore.get('messages', { valueEncoding: 'json' }),
-    apply: async (nodes, view) => {
-      for (const node of nodes) {
-        await view.append(node.value)
-      }
-    }
-  })
+    console.log('=== Receiver ===')
+    console.log('Listening from key:', key)
 
-  await base.ready()
+    const seen = new Set()
+    await drain(pass, seen, '[existing]')
 
-  console.log('=== RECEIVER ===')
-  console.log('Following bootstrap key:', bootstrapHex)
+    pass.on('update', async () => {
+        await drain(pass, seen, '[received]')
+    })
 
-  const swarm = new Hyperswarm()
-  swarm.on('connection', (conn, info) => {
-    const remote = info.publicKey.toString('hex').slice(0, 8)
-    console.log('[peer connected]', remote)
-    store.replicate(conn)
-    conn.on('close', () => console.log('[peer disconnected]', remote))
-    conn.on('error', (e) => console.log('[peer error]', remote, e.message))
-  })
 
-  swarm.join(base.discoveryKey, { server: true, client: true })
-  await swarm.flush()
-  console.log('Swarming. Waiting for messages...')
-  console.log()
-
-  let cursor = base.view.length
-  for (let i = 0; i < cursor; i++) {
-    const block = await base.view.get(i)
-    console.log('[existing]', block)
-  }
-
-  base.on('update', async () => {
-    await base.update()
-    const len = base.view.length
-    for (let i = cursor; i < len; i++) {
-      const block = await base.view.get(i)
-      console.log('[received]', block)
-    }
-    cursor = len
-  })
-
-  process.on('SIGINT', async () => {
-    console.log('\nShutting down...')
-    await swarm.destroy()
-    await base.close()
-    await store.close()
-    process.exit(0)
-  })
+    process.on('SIGINT', async () => {
+        console.log('\nShutting down...')
+        await pass.close()
+        process.exit(0)
+    })
 }
+
+function drain (pass, seen, tag) {
+      return new Promise((resolve, reject) => {
+          const stream = pass.list()
+          stream.on('data', (entry) => {
+              if (seen.has(entry.key)) return
+              seen.add(entry.key)
+              console.log(tag, entry.key, entry.value)
+          })
+          stream.on('end', resolve)
+          stream.on('error', reject)
+          })
+      }
 
 main().catch((err) => {
   console.error(err)
