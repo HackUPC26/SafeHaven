@@ -246,6 +246,18 @@ For the next coding session, a practical order is:
 4. Keep the WebSocket bridge clearly marked as a prototype-only path.
 5. Start replacing bridge behavior with the BMAD Hypercore replication story.
 
+## Known Prototype Limits
+
+These are expected gaps in the current hackathon code:
+
+- The WebSocket bridge is a local demo helper, not the final no-server design.
+- Audio, video, and AI labels are documented in BMAD but not fully wired through
+  the end-to-end product flow yet.
+- Receiver evidence export is part of the target scope and still needs final
+  implementation.
+- Physical-device testing is required for location, microphone, camera, and iOS
+  native trigger behavior.
+
 ## Safety And Privacy Notes
 
 - This is a prototype, not a production emergency service.
