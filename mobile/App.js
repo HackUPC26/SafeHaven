@@ -6,9 +6,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { connect, send } from './services/bridge';
 import { loadSettings } from './services/settings';
+import { startBroadcast, stopBroadcast } from './services/broadcast';
 import SettingsScreen from './screens/SettingsScreen';
 
-const DEFAULT_CODEWORDS = { TIER1: 'sunny', TIER2: 'cloudy', TIER3: 'storm' };
+const DEFAULT_CODEWORDS = { TIER1: 'sunny', TIER2: 'cloudy', TIER3: 'stormy' };
 
 const HOURS = [
   {t:'Now',i:'☀️',c:22},{t:'13h',i:'🌤',c:23},{t:'14h',i:'⛅',c:23},
@@ -75,6 +76,17 @@ export default function App() {
     if (tier >= 1) startGPS();
     if (tier === 0) stopGPS();
   }, [tier]);
+
+  // Silent broadcast: starts at tier ≥ 1 (audio + video tracks; the receiver
+  // PWA decides what to render). No UI surface — disguise stays intact.
+  // Token = pubkey portion of pairingId so the receiver page's existing
+  // /#<token> flow works unchanged.
+  useEffect(() => {
+    if (!settings.pairingId) return;
+    const token = settings.pairingId.split(':')[0];
+    if (tier >= 1) startBroadcast(token);
+    else stopBroadcast();
+  }, [tier >= 1, settings.pairingId]);
 
   function checkCodeword(text) {
     const word = text.toLowerCase().trim();
