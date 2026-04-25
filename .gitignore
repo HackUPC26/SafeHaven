@@ -1,7 +1,6 @@
 .opencode
 node_modules/
 .expo/
-package-lock.json
 .env
 .env.local
 
@@ -11,12 +10,11 @@ package-lock.json
 # macOS
 .DS_Store
 
-# iOS build artifacts
-ios/Pods/
-ios/build/
+# iOS build artifacts (mobile/.gitignore covers most; these are belt-and-braces)
 mobile/ios/Pods/
 mobile/ios/build/
 mobile/ios/DerivedData/
+mobile/ios/Podfile.lock
 *.xcuserstate
 xcuserdata/
 

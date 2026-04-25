@@ -1,5 +1,9 @@
 # SafeHaven
 
+> **One-line pitch:** SafeHaven is a covert safety app disguised as an everyday
+> app that lets people in danger silently escalate from live audio to full
+> evidence capture using voice, hidden gestures, and AI-assisted auto-triggering.
+
 SafeHaven is a hackathon MVP for covert emergency assistance. The sender app is
 disguised as a normal weather app, but it can silently escalate an incident
 through hidden triggers, codewords, and planned AI auto-triggers. A trusted
@@ -8,6 +12,52 @@ incident timeline, and planned audio/video/AI evidence.
 
 This README combines the current runnable prototype notes with the BMAD planning
 artifacts in `_bmad-output/planning-artifacts/`.
+
+## Problem
+
+People in danger often cannot safely call for help.
+
+In domestic abuse and coercive-control contexts, visible SOS behavior can
+*increase* risk. Existing tools are usually either:
+
+- **passive** — location sharing without intervention, or
+- **overt** — panic/SOS interfaces that can be noticed.
+
+The missing capability is discreet, real-time trusted-contact intervention with
+evidence continuity.
+
+## Solution
+
+SafeHaven combines:
+
+- Disguised sender app UI (weather skin in the MVP; podcast/notes/clock skins planned)
+- Covert activation (codewords, hidden gestures, planned Back Tap / Action Button / Siri phrase)
+- Three-tier escalation through codewords and optional AI auto-trigger
+- Trusted-contact browser dashboard — no app install, opens from a shared link
+- Tamper-evident incident log and explicit evidence export flow
+
+**Positioning:** *When visible help is dangerous, SafeHaven brings a trusted
+witness in silently.*
+
+### PEARS Sponsor Track
+
+SafeHaven is built on the **Pear protocol** (Hypercore + Hyperswarm + Bare
+runtime) for the PEARS sponsor track. The target architecture transmits all
+incident data exclusively peer-to-peer between the sender's iPhone and the
+trusted contact's browser. No cloud backend stores or proxies sensitive data —
+the only server is a static file host that delivers the receiver PWA bundle on
+first load.
+
+> The current hackathon demo uses WebRTC over a small WebSocket signaling
+> server while the no-server browser-to-Hypercore replication path is built.
+> See *Architecture Target* and *Known Prototype Limits* below.
+
+## Target Users
+
+- **Primary:** people at risk of intimate partner violence and coercive control.
+- **Secondary:** people walking alone at night, students, travelers, elderly users.
+- **Decision-maker in incident:** the trusted contact who needs immediate,
+  interpretable context to decide whether to call emergency services.
 
 ## Quick Version
 
@@ -41,6 +91,71 @@ The MVP flow from the BMAD docs:
 | 1 | Monitor | Start audio context and live GPS |
 | 2 | Escalated | Add live video |
 | 3 | Emergency | High-priority alert and call-assist UX |
+
+### Sender (iPhone) experience
+
+- App appears as a normal utility UI (weather screen).
+- User triggers discreetly — codeword in the search field, or 3-second hold
+  on the H/L row.
+- Escalation tiers activate with minimal visible change to the disguise.
+- Planned: on-device AI detects danger signals when the user cannot act.
+
+### Receiver (Browser Dashboard) elements
+
+The target dashboard renders, side-by-side:
+
+- **Live video feed** with AI annotation overlays (person count, posture,
+  scene context). Last frame + annotations persist with a staleness timestamp
+  if the feed freezes.
+- **Audio label rail** — scrolling timeline of AI audio labels, timestamped
+  and colour-coded: red for IMPACT/SCREAMING, amber for SHOUTING, grey for
+  SILENCE.
+- **Live GPS map** — pin, address, coordinates, movement trail.
+- **AI risk assessment banner** — synthesises all signals: green / amber / red
+  with actionable guidance text.
+- **Incident timeline** — chronological colour-coded events (tier changes, AI
+  triggers, GPS updates).
+- **"Call Police with Location"** — primary action button, large, red, always
+  visible, pre-loaded with live GPS coordinates.
+- **"Save Evidence"** — secondary button, packages session data for download.
+- **Session header** — person's name, active tier badge, session duration, P2P
+  connection status.
+
+### Privacy and Evidence Model
+
+- Append-only Hypercore log gives tamper-evident chronology.
+- Default minimize-retention posture (session-first; no automatic cloud
+  storage).
+- Post-incident persistence is **explicit** — the trusted contact must click
+  *Save Evidence* to download anything. Nothing persists on the receiver's
+  device without that consent action.
+- Evidence package: NDJSON timeline + media chunk references + AI label log
+  with timestamps and confidence scores + GPS track + (planned) PDF report
+  with key video frames.
+
+### Onboarding and Pairing (target flow)
+
+**Sender first-time setup:**
+
+1. Install SafeHaven dev client.
+2. Choose disguise skin, configure 3 codewords, set trusted contact.
+3. App generates an incident keypair (Hypercore public key + shared encryption
+   key).
+4. App shows a QR code and shareable link
+   (`https://dashboard.safe-haven.app/#<pubkey>:<encryptionKey>`).
+   The `#fragment` is never sent to the static server.
+5. User shares the link with their trusted contact via any channel.
+6. Optional: configure Back Tap / Action Button as a hidden activation
+   shortcut.
+
+**Trusted contact setup:**
+
+1. Open the shared link in any modern browser.
+2. Browser downloads the static PWA bundle once.
+3. Browser reads the keypair from the URL fragment (client-side only).
+4. Dashboard enters standby mode — *Waiting for connection.*
+5. When an incident starts, the browser auto-connects via Hyperswarm DHT and
+   begins replicating.
 
 ## Short Demo Script
 
@@ -81,6 +196,17 @@ Planned incident entry types include `incident_start`, `tier_change`, `gps`,
 `audio_chunk`, `video_chunk`, `ai_label`, `ai_video_annotation`, and
 `incident_end`.
 
+### Planned Neural Engine AI Layers
+
+1. **Auto-trigger from sound classification**
+   - Escalating voices → Tier 1
+   - Screaming / impact-like events → Tier 2
+   - Sustained distress → Tier 3 (policy-based, with cooldown windows + manual override)
+2. **Audio labelling for receiver clarity** — labels such as SHOUTING, CRYING,
+   IMPACT, GLASS BREAKING, EXTENDED SILENCE.
+3. **Video annotation metadata** — person count, rapid motion flags, scene
+   cues; last-known annotation persists if the stream degrades.
+
 Current implementation caveat:
 
 The runnable demo uses WebRTC over a small WebSocket signaling server while
@@ -106,18 +232,36 @@ unconditionally and survives app restarts.
 
 ## Installation
 
-### Prerequisites
+> Expo Go does **not** work — `react-native-webrtc` and `react-native-bare-kit`
+> need a custom dev client. The first build has to go through Xcode.
+
+### 0. Prerequisites
+
+System:
 
 - macOS (for iOS builds) — Linux/Windows works for the signaling server +
   receiver browser only
 - Node.js ≥ 20 and npm
-- Xcode 15+ with the iOS 17 simulator runtime, or a physical iPhone with a
-  paired Apple Developer account
-- CocoaPods (`sudo gem install cocoapods` or via Homebrew)
-- Expo CLI ships with the project; no global install needed
+- A physical iPhone (recommended for camera + mic + GPS) **or** an iOS
+  simulator runtime
 
-> Expo Go does **not** work — `react-native-webrtc` and `react-native-bare-kit`
-> need a custom dev client. Use `npx expo run:ios` for the first build.
+First-time-only macOS / Xcode setup (skip what you already have):
+
+1. **Install Xcode** from the Mac App Store (≥ 15). Open it once so it
+   finishes the post-install components dance.
+2. **Install Xcode command-line tools**: `xcode-select --install`
+3. **Accept the Xcode license**: `sudo xcodebuild -license accept`
+4. **Install an iOS simulator runtime** (recent Xcode ships without one):
+   Xcode → Settings → Platforms → click the **+** next to iOS → install
+   the latest iOS runtime. *(Skip if you'll only build to a physical iPhone.)*
+5. **Install CocoaPods**: `sudo gem install cocoapods`
+   (or `brew install cocoapods` if you prefer Homebrew)
+6. **For physical-device builds, sign in to Xcode with an Apple ID:**
+   Xcode → Settings → Accounts → **+** → Apple ID. A free Apple ID is
+   enough for development; no paid Developer Program needed.
+7. **Trust the developer profile on the iPhone** the first time you
+   install: iPhone Settings → General → VPN & Device Management → tap
+   your Apple ID → Trust. Until you do, the app crashes on launch.
 
 ### 1. Clone and install JS deps
 
@@ -134,49 +278,70 @@ cd ../p2p-hello
 npm install
 ```
 
-### 2. Install iOS native dependencies
-
-CocoaPods links `react-native-webrtc`, `react-native-bare-kit`, and the
-Expo modules into the Xcode project.
-
-```bash
-cd ../mobile/ios
-pod install
-```
-
-### 3. (Optional) Re-pack the Bare Worklet bundle
+### 2. (Optional) Re-pack the Bare Worklet bundle
 
 A prebuilt `mobile/backend/worklet.bundle.mjs` is checked in, so this step
 is only needed if you change `mobile/backend/worklet.js`.
 
 ```bash
-cd mobile
+# from mobile/
 npm run pack:worklet
 ```
 
-### 4. First iOS build (Xcode)
+### 3. First iOS build
 
-Plug in an iPhone (recommended for camera + mic + GPS) or use the simulator.
+The `mobile/ios/` Xcode project (Podfile, Info.plist with camera/mic/location
+permissions, AppDelegate, etc.) **is committed**. `Pods/` and `build/` are not
+— `expo run:ios` runs `pod install` for you on first invocation.
+
+Plug in an iPhone (unlock + trust the laptop) or pick a simulator, then:
 
 ```bash
-cd mobile
-npx expo run:ios --device      # physical device
+# from mobile/
+npx expo run:ios --device      # physical iPhone
 # or:
 npx expo run:ios               # simulator
 ```
 
-The first build takes 5–10 minutes (Pods, RN, native modules). After it
-finishes, the SafeHaven dev client is installed on the device.
+The first build takes 5–10 minutes (Pods download, RN compile, native
+modules). When it finishes, the dev client app (named **mobile** on the
+home screen — bundle ID `com.fochs.safehaven`) is installed.
 
-For subsequent runs you only need Metro:
+If `pod install` fails with "no such xcode" / signing errors, point
+CocoaPods at the right Xcode once and retry:
+`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`.
+
+**If the build fails with a code-signing error**, open the workspace and
+set a team:
+
+1. `open mobile/ios/mobile.xcworkspace` (NOT `.xcodeproj`).
+2. Select the **mobile** target → **Signing & Capabilities** tab.
+3. Tick **Automatically manage signing** and pick your Apple ID team in
+   **Team**. Xcode generates a development bundle ID for you.
+4. Re-run `npx expo run:ios --device`.
+
+You can also build entirely from Xcode: open the workspace, pick your
+device in the toolbar, hit ▶. Metro still has to be running separately
+(next step).
+
+### 4. Subsequent runs (no rebuild needed)
+
+After the first build, you only need Metro running on the laptop. The
+dev client app on the phone connects to it.
 
 ```bash
-cd mobile
-npx expo start --dev-client    # then press 'i' or open the dev client app
+# from mobile/
+npx expo start --dev-client
+# press 'i' to open the simulator, or just open the dev client app on the phone
 ```
 
-If you'd rather build from Xcode UI: open `mobile/ios/mobile.xcworkspace`
-(NOT `.xcodeproj`), select your device, hit ▶.
+You only need to repeat step 3 (`expo run:ios`) when:
+
+- You change `mobile/package.json` and the new dep is a native module
+  (re-runs `pod install`).
+- You edit anything in `mobile/ios/` (Info.plist, entitlements, etc.).
+- You re-run `npm run pack:worklet` (rebuilds the Bare bundle).
+- The dev client crashes on launch with native-module errors.
 
 ### 5. Configure the signaling host (usually unneeded)
 
@@ -209,10 +374,13 @@ npx expo start --dev-client    # press 'i', or open the dev client on the phone
 
 ```text
 # Browser — receiver
-http://<your-ip>:8080/
-# Paste the pairing token from the phone (long-press "Barcelona" → Settings;
-# the token is the part before ':') or open directly with:
+# Easiest: scan the QR code shown on the phone (long-press "Barcelona" 2s
+# → Settings → Trusted Contact Pairing). The QR encodes the full URL
+# below, so the browser opens straight into the dashboard.
 http://<your-ip>:8080/#<token>
+
+# Without QR: open http://<your-ip>:8080/ and paste the token (the hex
+# string shown under the QR, before the ':') into the overlay.
 ```
 
 ### Triggers
