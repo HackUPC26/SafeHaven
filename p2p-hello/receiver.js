@@ -1,46 +1,31 @@
 import Autopass from 'autopass'
 import Corestore from 'corestore'
 
-async function main() {
-    const store = new Corestore('./storage-receiver')
-    const key = process.argv[2]
-    const pair = Autopass.pair(store, key)
+const invite = process.argv[2]
 
-    const pass = await pair.finished()
-    await pass.ready()
-
-    console.log('=== Receiver ===')
-    console.log('Listening from key:', key)
-
-    const seen = new Set()
-    await drain(pass, seen, '[existing]')
-
-    pass.on('update', async () => {
-        await drain(pass, seen, '[received]')
-    })
-
-
-    process.on('SIGINT', async () => {
-        console.log('\nShutting down...')
-        await pass.close()
-        process.exit(0)
-    })
+if (!invite) {
+  console.log('❌ Provide invite from sender')
+  process.exit(1)
 }
 
-function drain (pass, seen, tag) {
-      return new Promise((resolve, reject) => {
-          const stream = pass.list()
-          stream.on('data', (entry) => {
-              if (seen.has(entry.key)) return
-              seen.add(entry.key)
-              console.log(tag, entry.key, entry.value)
-          })
-          stream.on('end', resolve)
-          stream.on('error', reject)
-          })
-      }
+const store = new Corestore('./receiver-store')
 
-main().catch((err) => {
-  console.error(err)
-  process.exit(1)
+// pair with sender
+const pair = Autopass.pair(store, invite)
+
+const pass = await pair.finished()
+await pass.ready()
+
+console.log('🔗 Paired successfully!')
+console.log('👂 Listening for messages...\n')
+
+// listen for updates
+pass.on('update', async () => {
+  const stream = pass.list()
+
+  for await (const entry of stream) {
+    if (entry.key === 'message') {
+      console.log('📩 received:', entry.value.toString())
+    }
+  }
 })

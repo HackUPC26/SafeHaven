@@ -1,42 +1,27 @@
-import Corestore from 'corestore'
 import Autopass from 'autopass'
+import Corestore from 'corestore'
 import readline from 'readline'
-import process from 'process'
 
-async function main () {
-  const store = new Corestore('./storage-sender')
-  const pass = new Autopass(store)
-  await pass.ready()
+const store = new Corestore('./sender-store')
+const pass = new Autopass(store)
 
-  const invite = await pass.createInvite()
+await pass.ready()
 
-  console.log('=== SENDER ===')
-  console.log('Invite:', invite)
-  console.log('Share that with the receiver: node receiver.js <invite>')
-  console.log('Press ENTER to add a "hello world" entry. Ctrl+C to quit.')
-  console.log()
+// create invite for receiver
+const invite = await pass.createInvite()
+console.log('\n📨 SHARE THIS INVITE WITH RECEIVER:\n')
+console.log(invite)
+console.log('\n-----------------------------\n')
 
-  pass.on('update', () => {
-    console.log('[update] writers/entries changed')
-  })
+// setup input
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+})
 
-  let counter = 0
-  const rl = readline.createInterface({ input: process.stdin })
-  rl.on('line', async () => {
-    const key = `hello-${counter++}`
-    const value = JSON.stringify({ text: 'hello world', time: new Date().toISOString() })
-    await pass.add(key, value)
-    console.log('[sent]', key, value)
-  })
+console.log('Type messages to send:\n')
 
-  process.on('SIGINT', async () => {
-    console.log('\nShutting down...')
-    await pass.close()
-    process.exit(0)
-  })
-}
-
-main().catch((err) => {
-  console.error(err)
-  process.exit(1)
+rl.on('line', async (msg) => {
+  await pass.add('message', msg)
+  console.log('✔ sent:', msg)
 })
