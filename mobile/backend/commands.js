@@ -1,0 +1,7 @@
+module.exports = {
+  CMD_PING: 1,
+  CMD_GET_PUBKEY: 2,
+  CMD_APPEND_ENTRY: 3,
+  CMD_GET_LENGTH: 4,
+  CMD_JOIN_SWARM: 5,
+}

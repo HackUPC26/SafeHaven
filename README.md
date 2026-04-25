@@ -15,13 +15,14 @@ SafeHaven is a safety demo with two sides:
 
 - The sender side is a mobile app that looks like a normal weather app.
 - The receiver side is a browser dashboard for a trusted contact.
-- The current prototype sends status and location events through a local bridge.
-- The target BMAD architecture replaces the bridge with encrypted P2P incident
-  replication.
+- Live audio, video, location, and tier state stream from sender to receiver
+  over WebRTC; a thin Node signaling server brokers the connection.
+- A Bare Worklet inside the iOS app keeps a durable on-device incident log in
+  Hypercore (the planned end-to-end-encrypted P2P replication target).
 
-For a hackathon demo, the easiest path is to run the bridge, start the mobile
-app, open the receiver PWA, then trigger an incident from the disguised weather
-screen.
+For a hackathon demo, the easiest path is to run the signaling server, start
+the mobile app, open the receiver in a browser, then trigger an incident from
+the disguised weather screen.
 
 ## Product Scope
 
@@ -57,10 +58,9 @@ Use this script for a 2 minute walkthrough:
 
 | Component | Directory | Description |
 | --- | --- | --- |
-| Mobile App | `mobile/` | Expo React Native sender app with weather disguise, settings, QR setup, tier state, and location/status events |
-| Receiver PWA | `receiver/` | Static PWA that displays incoming incident context |
-| P2P Socket Server | `p2p-hello/` | Node.js WebSocket + Autopass bridge for the current prototype |
-| iOS Project | `ios/` | Generated iOS native project for the Expo app |
+| Mobile App | `mobile/` | Expo React Native sender app with weather disguise, settings, QR setup, tier state machine, GPS, WebRTC broadcast, and a Bare Worklet that runs the Hypercore log on-device |
+| Receiver PWA | `receiver/` | React-based browser PWA — receives the WebRTC stream and renders tier banner, video, audio levels, GPS map, and the incident timeline |
+| Signaling Server | `p2p-hello/` | Tiny Node WebSocket server (`signaling.js`) that brokers WebRTC SDP/ICE between sender and receivers, and static-hosts `receiver/` at `/` |
 | BMAD Docs | `_bmad-output/` | Product, architecture, market, and story artifacts |
 | BMAD Config | `_bmad/` | BMAD method config, agents, workflows, and manifests |
 
