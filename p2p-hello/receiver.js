@@ -33,6 +33,8 @@ async function main () {
     const remote = info.publicKey.toString('hex').slice(0, 8)
     console.log('[peer connected]', remote)
     store.replicate(conn)
+    conn.on('close', () => console.log('[peer disconnected]', remote))
+    conn.on('error', (e) => console.log('[peer error]', remote, e.message))
   })
 
   swarm.join(base.discoveryKey, { server: true, client: true })
