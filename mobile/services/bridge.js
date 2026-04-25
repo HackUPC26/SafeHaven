@@ -1,4 +1,4 @@
-const RELAY_URL = 'ws://10.5.245.116:8080';
+const RELAY_URL = 'ws://10.5.244.128:8080';
 
 let ws;
 let retryTimer;
