@@ -1,0 +1,16 @@
+{
+  "name": "safehaven-p2p-hello",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Minimal Autopass hello-world for SafeHaven.",
+  "scripts": {
+    "sender": "node sender.js",
+    "receiver": "node receiver.js"
+  },
+  "dependencies": {
+    "autopass": "^3.4.1",
+    "corestore": "^7.4.5",
+    "ws": "^8.20.0"
+  }
+}
