@@ -252,5 +252,17 @@ For the next coding session, a practical order is:
 - `_bmad-output/planning-artifacts/SafeHaven-Epics-and-Stories.md`
 - `_bmad-output/planning-artifacts/SafeHaven-Product-Brief-v2.md`
 
+## Glossary
+
+- BMAD: the planning workflow used in this repo.
+- Sender: the person using the disguised mobile app.
+- Receiver: the trusted contact viewing the browser dashboard.
+- Tier: the current incident severity level from 0 to 3.
+- Hypercore: the append-only log planned for incident data.
+- Hyperswarm: the P2P discovery and connection layer in the target design.
+- Autopass: the current demo P2P building block used in `p2p-hello/`.
+- Call assist: helping the receiver call emergency services without promising
+  guaranteed dispatch.
+
 Recommended next workflow: `bmad-dev-story`, starting with
 `E1.3 - Hyperswarm announce + browser replication spike`.
