@@ -7,6 +7,48 @@ import QRCode from 'react-native-qrcode-svg';
 import { saveSettings, resetSettings } from '../services/settings';
 import { SIGNAL_HTTP } from '../services/config';
 
+const CODEWORD_TIERS = [
+  {
+    key: 'TIER1',
+    label: 'Tier 1 — Audio + GPS',
+    shortLabel: 'Tier 1',
+    suggestions: [
+      'I need to check the forecast',
+      'Can you check the humidity',
+      'The weather is changing',
+    ],
+  },
+  {
+    key: 'TIER2',
+    label: 'Tier 2 — Video',
+    shortLabel: 'Tier 2',
+    suggestions: [
+      'Should I bring a jacket today',
+      'What is the temperature outside',
+      'It might rain later',
+    ],
+  },
+  {
+    key: 'TIER3',
+    label: 'Tier 3 — Emergency',
+    shortLabel: 'Tier 3',
+    suggestions: [
+      'I might need an umbrella later',
+      'The wind is picking up',
+      'Can you see the storm clouds',
+    ],
+  },
+];
+
+const GOOD_PHRASE_GUIDE = [
+  'Sounds completely natural',
+  'Could be said to anyone',
+  'Not suspicious if overheard',
+  'Fits the disguise theme',
+];
+
+const AVOID_PHRASES = ['Help me', 'Emergency', 'Call police', 'SOS'];
+
 export default function SettingsScreen({ visible, onClose, settings, onSettingsChange }) {
   const [name, setName] = useState(settings.name);
   const [codewords, setCodewords] = useState({ ...settings.codewords });
@@ -39,6 +81,15 @@ export default function SettingsScreen({ visible, onClose, settings, onSettingsC
     onSettingsChange({ name: name.trim(), codewords: cleaned });
     setSaved(true);
     setTimeout(() => setSaved(false), 1500);
+  }
+
+  async function handleCopyLink() {
+    await Clipboard.setStringAsync(pairingUrl);
+    Alert.alert('Copied', 'Pairing link copied to clipboard.');
+  }
+
+  function handleSuggestionSelect(key, phrase) {
+    setCodewords(prev => ({ ...prev, [key]: phrase }));
   }
 
   function handleReset() {
@@ -89,11 +140,7 @@ export default function SettingsScreen({ visible, onClose, settings, onSettingsC
             {/* Trigger Words */}
             <Section title="TRIGGER WORDS">
               <Text style={styles.hint}>Type these into the search bar to escalate the alert tier.</Text>
-              {[
-                { key: 'TIER1', label: 'Tier 1 — Audio + GPS' },
-                { key: 'TIER2', label: 'Tier 2 — Video' },
-                { key: 'TIER3', label: 'Tier 3 — Emergency' },
-              ].map(({ key, label }) => (
+              {CODEWORD_TIERS.map(({ key, label }) => (
                 <View key={key} style={styles.codewordRow}>
                   <Text style={styles.codewordLabel}>{label}</Text>
                   <TextInput
@@ -107,6 +154,7 @@ export default function SettingsScreen({ visible, onClose, settings, onSettingsC
                   />
                 </View>
               ))}
+              <CodewordGuide codewords={codewords} onSelect={handleSuggestionSelect} />
             </Section>
 
             {/* Pairing */}
@@ -156,14 +204,75 @@ function Section({ title, children }) {
   );
 }
 
+function CodewordGuide({ codewords, onSelect }) {
+  return (
+    <View style={styles.guideWrap}>
+      <Text style={styles.guideEyebrow}>SUGGESTIONS - tap to select</Text>
+      {CODEWORD_TIERS.map(({ key, shortLabel, suggestions }) => (
+        <View key={key} style={styles.suggestionGroup}>
+          <Text style={styles.suggestionTier}>{shortLabel}</Text>
+          {suggestions.map(phrase => {
+            const selected = codewords[key]?.trim().toLowerCase() === phrase.toLowerCase();
+            return (
+              <TouchableOpacity
+                key={phrase}
+                style={[styles.suggestionPill, selected && styles.suggestionPillSelected]}
+                onPress={() => onSelect(key, phrase)}
+                activeOpacity={0.75}
+              >
+                <Text style={[styles.suggestionText, selected && styles.suggestionTextSelected]}>
+                  &quot;{phrase}&quot;
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ))}
+
+      <View style={styles.guideColumns}>
+        <View style={[styles.guideCard, styles.goodGuideCard]}>
+          <Text style={[styles.guideCardTitle, styles.goodGuideTitle]}>✓ GOOD PHRASES</Text>
+          {GOOD_PHRASE_GUIDE.map(item => (
+            <Text key={item} style={styles.guideBullet}>· {item}</Text>
+          ))}
+        </View>
+        <View style={[styles.guideCard, styles.avoidGuideCard]}>
+          <Text style={[styles.guideCardTitle, styles.avoidGuideTitle]}>× AVOID</Text>
+          {AVOID_PHRASES.map(item => (
+            <Text key={item} style={styles.avoidPhrase}>&quot;{item}&quot;</Text>
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.privacyNote}>
+        <Text style={styles.privacyTitle}>🔒 On-device only</Text>
+        <Text style={styles.privacyBody}>
+          Voice detection runs entirely on your device. Audio is never recorded, stored, or sent anywhere.
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 const colors = {
   bg: '#0f1117',
   cardBg: '#1c1f2a',
   border: '#2a2d3a',
   text: '#e8eaf0',
   muted: '#555870',
+  mutedText: '#9699a8',
   accent: '#4a90d9',
+  accentSoft: '#182541',
+  good: '#8df2bf',
+  goodBg: '#102323',
+  goodBorder: '#24533f',
   danger: '#e05252',
+  dangerSoft: '#ff99ad',
+  dangerBg: '#201322',
+  dangerBorder: '#633044',
+  purple: '#a790ff',
+  purpleBg: '#17182d',
+  purpleBorder: '#3a3566',
 };
 
 const styles = StyleSheet.create({
@@ -213,6 +322,98 @@ const styles = StyleSheet.create({
   codewordRow: { marginBottom: 12 },
   codewordLabel: { fontSize: 13, color: colors.muted, marginBottom: 6 },
   codewordInput: {},
+
+  guideWrap: { marginTop: 8 },
+  guideEyebrow: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.muted,
+    letterSpacing: 1.2,
+    marginBottom: 10,
+  },
+  suggestionGroup: { marginBottom: 14 },
+  suggestionTier: {
+    fontSize: 12,
+    color: colors.mutedText,
+    marginBottom: 8,
+    fontWeight: '600',
+  },
+  suggestionPill: {
+    backgroundColor: '#161a25',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    marginBottom: 8,
+  },
+  suggestionPillSelected: {
+    backgroundColor: colors.accentSoft,
+    borderColor: colors.accent,
+  },
+  suggestionText: { color: colors.mutedText, fontSize: 14, lineHeight: 19 },
+  suggestionTextSelected: { color: '#a9ccff' },
+  guideColumns: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 4,
+    marginBottom: 14,
+  },
+  guideCard: {
+    flex: 1,
+    minHeight: 154,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  goodGuideCard: {
+    backgroundColor: colors.goodBg,
+    borderColor: colors.goodBorder,
+  },
+  avoidGuideCard: {
+    backgroundColor: colors.dangerBg,
+    borderColor: colors.dangerBorder,
+  },
+  guideCardTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    marginBottom: 10,
+  },
+  goodGuideTitle: { color: colors.good },
+  avoidGuideTitle: { color: colors.dangerSoft },
+  guideBullet: {
+    color: colors.mutedText,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 4,
+  },
+  avoidPhrase: {
+    color: colors.mutedText,
+    fontSize: 13,
+    fontStyle: 'italic',
+    lineHeight: 20,
+  },
+  privacyNote: {
+    backgroundColor: colors.purpleBg,
+    borderColor: colors.purpleBorder,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  privacyTitle: {
+    color: colors.purple,
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  privacyBody: {
+    color: colors.mutedText,
+    fontSize: 13,
+    lineHeight: 19,
+  },
 
   qrWrap: {
     alignItems: 'center',

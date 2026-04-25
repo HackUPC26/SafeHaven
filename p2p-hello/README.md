@@ -127,8 +127,9 @@ A dot appears top-right when active (orange = tiers 1–2, red = tier 3).
 
 | Path | Purpose |
 |------|---------|
-| `p2p-hello/signaling.js` | WebSocket signaling server |
-| `p2p-hello/receiver-pwa/index.html` | Browser receiver PWA |
+| `p2p-hello/signaling.js` | WebSocket signaling server (also hosts the receiver UI at `/`) |
+| `receiver/index.html` | Polished React PWA — served at `/` by the signaling server |
+| `p2p-hello/receiver-pwa/index.html` | Older minimal receiver — no longer served, kept for reference |
 | `p2p-hello/sender-demo.html` | Browser sender for testing |
 | `mobile/services/config.js` | Signal server URL (reads `.env`) |
 | `mobile/services/broadcast.js` | Sender WebRTC service |

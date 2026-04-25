@@ -1,6 +1,7 @@
 .opencode
 node_modules/
 .expo/
+package-lock.json
 .env
 .env.local
 
@@ -24,8 +25,14 @@ xcuserdata/
 
 # LevelDB / Hypercore databases
 p2p-hello/receiver-store/
+p2p-hello/.receiver-store/
+p2p-hello/.writer-store/
+p2p-hello/storage-core/
 
 # Expo
 mobile/.expo/
 
 p2p-hello/storage-core/*
+ios/SafeHaven.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+ios/.xcode.env.local
+ios/SafeHaven.xcodeproj/project.xcworkspace/contents.xcworkspacedata
