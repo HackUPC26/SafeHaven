@@ -27,3 +27,5 @@ p2p-hello/receiver-store/
 
 # Expo
 mobile/.expo/
+
+p2p-hello/storage-core/*
