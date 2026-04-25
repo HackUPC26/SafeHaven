@@ -1,31 +1,22 @@
-const CACHE = 'safehaven-receiver-v1';
+// SAFE-MODE / KILL-SWITCH service worker.
+// During the hackathon the SW caused more pain than it solved (cache-first
+// + dropped precache made stale pages stick and broke offline). This
+// version installs, immediately deletes every cache, unregisters itself,
+// and force-reloads any controlled tabs so the next request goes straight
+// to the network — no SW, no cache, no dance.
+self.addEventListener('install', () => self.skipWaiting());
 
-const PRECACHE = [
-  './',
-  './index.html',
-  './manifest.json',
-  './icon.svg',
-  'https://unpkg.com/react@18.3.1/umd/react.development.js',
-  'https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js',
-  'https://unpkg.com/@babel/standalone@7.29.0/babel.min.js',
-];
-
-self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(PRECACHE)).then(() => self.skipWaiting())
-  );
+self.addEventListener('activate', (e) => {
+  e.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.map(k => caches.delete(k)));
+    await self.registration.unregister();
+    const clients = await self.clients.matchAll({ type: 'window' });
+    for (const client of clients) {
+      try { client.navigate(client.url); } catch (_) {}
+    }
+  })());
 });
 
-self.addEventListener('activate', e => {
-  e.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
-      .then(() => self.clients.claim())
-  );
-});
-
-self.addEventListener('fetch', e => {
-  e.respondWith(
-    caches.match(e.request).then(cached => cached || fetch(e.request))
-  );
-});
+// Pass-through fetch in the brief window before unregister completes.
+self.addEventListener('fetch', (e) => { e.respondWith(fetch(e.request)); });

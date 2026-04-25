@@ -21,29 +21,23 @@ function makePeerId() {
   return Math.random().toString(36).slice(2, 10)
 }
 
+// Polished receiver UI lives in ../receiver/ (the React PWA). Signaling
+// server doubles as its static host so a single port serves both the page
+// and the WebRTC signaling WS — the receiver hits /ws on the same origin
+// it loaded from.
 const STATIC = {
-  '/':            ['receiver-pwa/index.html', 'text/html'],
-  '/index.html':  ['receiver-pwa/index.html', 'text/html'],
-  '/sender':      ['sender-demo.html', 'text/html'],
-  '/sender.html': ['sender-demo.html', 'text/html'],
+  '/':                  ['../receiver/index.html',        'text/html'],
+  '/index.html':        ['../receiver/index.html',        'text/html'],
+  '/manifest.json':     ['../receiver/manifest.json',     'application/json'],
+  '/sw.js':             ['../receiver/sw.js',             'application/javascript'],
+  '/icon.svg':          ['../receiver/icon.svg',          'image/svg+xml'],
+  '/icon-maskable.svg': ['../receiver/icon-maskable.svg', 'image/svg+xml'],
+  '/sender':            ['sender-demo.html',              'text/html'],
+  '/sender.html':       ['sender-demo.html',              'text/html'],
 }
 
 const server = createServer((req, res) => {
   const { pathname } = new URL(req.url, 'http://x')
-
-  if (pathname === '/manifest.json') {
-    res.writeHead(200, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({
-      name: 'SafeHaven Receiver',
-      short_name: 'SafeHaven',
-      start_url: '/',
-      display: 'standalone',
-      background_color: '#1a1a2e',
-      theme_color: '#e94560',
-      icons: [],
-    }))
-    return
-  }
 
   const entry = STATIC[pathname]
   if (entry) {
