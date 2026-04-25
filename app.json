@@ -17,7 +17,6 @@
         "NSSpeechRecognitionUsageDescription": "SafeHaven listens for your safety codeword to start an incident."
       }
     },
-    "android": { "package": "com.safehaven.app" },
-    "plugins": ["react-native-bare-kit"]
+    "android": { "package": "com.safehaven.app" }
   }
 }
