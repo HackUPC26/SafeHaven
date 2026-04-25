@@ -3,8 +3,9 @@
 // Tier 1 = incident started, recording audio + sending GPS
 // Tier 2 = escalated, now also recording video
 // Tier 3 = emergency, receiver sees a big "call for help" button
+import * as Location from 'expo-location';
+import { useState, useEffect, useRef } from 'react';
 
-import { useState } from 'react';
 import { StyleSheet, Text, View, Pressable, TextInput } from 'react-native';
 
 const CODEWORDS = { TIER1: 'sunny', TIER2: 'cloudy', TIER3: 'storm' };
@@ -22,6 +23,36 @@ export default function App() {
     if (word === CODEWORDS.TIER2 && tier === 1) setTier(2);
     if (word === CODEWORDS.TIER3 && tier === 2) setTier(3);
   }
+  const locationRef = useRef(null);
+  useEffect(() => {
+    if (tier === 1 ) {
+      startGPS();
+    }
+    if (tier === 0 ) {
+      stopGPS();
+    }
+    }, [tier]);
+  
+  
+  async function startGPS() {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') return;
+
+    locationRef.current = await Location.watchPositionAsync(
+      { timeInterval: 5000, distanceInterval: 5 },
+      (loc) => {
+        console.log('GPS:', loc.coords.latitude, loc.coords.longitude);
+      }
+    );
+  }
+
+  function stopGPS() {
+    if (locationRef.current) {
+      locationRef.current.remove();
+      locationRef.current = null;
+    }
+  }
+    
 
   return (
     <View style={styles.container}>
