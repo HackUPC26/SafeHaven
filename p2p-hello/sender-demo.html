@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SafeHaven – Browser Sender Demo</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0 }
+    body {
+      background: #0f0f1a;
+      color: #eee;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 24px 16px;
+      gap: 16px;
+    }
+    h1 { font-size: 20px; font-weight: 600; color: #e94560 }
+    p.sub { font-size: 13px; color: rgba(255,255,255,0.4); text-align: center }
+    #preview-wrap {
+      width: 100%; max-width: 480px;
+      background: #000; border-radius: 12px;
+      overflow: hidden; aspect-ratio: 4/3;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    #preview { width: 100%; height: 100%; object-fit: cover; display: block }
+    .card {
+      width: 100%; max-width: 480px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px; padding: 16px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    label { font-size: 12px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em }
+    .token-box {
+      font-family: monospace;
+      font-size: 15px; font-weight: 600;
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 8px; padding: 10px 12px;
+      word-break: break-all; letter-spacing: 0.05em;
+      cursor: pointer; user-select: all;
+      color: #facc15;
+    }
+    .token-box:active { background: rgba(255,255,255,0.12) }
+    .url-box {
+      font-size: 12px; color: #60a5fa;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 8px; padding: 8px 10px;
+      word-break: break-all; cursor: pointer;
+      user-select: all;
+    }
+    #status {
+      font-size: 13px; padding: 6px 14px;
+      border-radius: 20px; display: inline-flex;
+      align-items: center; gap: 6px;
+      background: rgba(255,255,255,0.07);
+    }
+    #status.streaming  { color: #4ade80; background: rgba(74,222,128,0.12) }
+    #status.connecting { color: #fb923c; background: rgba(251,146,60,0.12) }
+    #status.waiting    { color: #94a3b8; background: rgba(148,163,184,0.10) }
+    #status.error      { color: #f87171; background: rgba(248,113,113,0.12) }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap }
+    button {
+      flex: 1; padding: 10px 16px;
+      border: none; border-radius: 8px;
+      cursor: pointer; font-size: 14px; font-weight: 500;
+    }
+    #btn-start { background: #e94560; color: white }
+    #btn-start:hover { background: #c73652 }
+    #btn-stop  { background: rgba(255,255,255,0.1); color: #eee }
+    #btn-stop:hover { background: rgba(255,255,255,0.18) }
+    #btn-stop:disabled { opacity: 0.3; cursor: not-allowed }
+    #copy-msg { font-size: 11px; color: #4ade80; height: 14px }
+  </style>
+</head>
+<body>
+  <h1>SafeHaven – Browser Sender</h1>
+  <p class="sub">Use this to test the full pipeline without an iPhone.</p>
+
+  <div id="preview-wrap">
+    <video id="preview" autoplay playsinline muted></video>
+  </div>
+
+  <div class="card">
+    <label>Your invite token (tap to copy)</label>
+    <div class="token-box" id="token-display" onclick="copyToken()">—</div>
+    <label>Receiver URL (open in another tab / device)</label>
+    <div class="url-box" id="url-display" onclick="copyUrl()">—</div>
+    <div id="copy-msg"></div>
+  </div>
+
+  <div id="status" class="waiting">Idle — click Start to broadcast</div>
+
+  <div class="card">
+    <div class="btn-row">
+      <button id="btn-start" onclick="start()">Start Broadcast</button>
+      <button id="btn-stop"  onclick="stop()"  disabled>Stop</button>
+    </div>
+  </div>
+
+  <script>
+    const previewEl  = document.getElementById('preview')
+    const statusEl   = document.getElementById('status')
+    const tokenDisp  = document.getElementById('token-display')
+    const urlDisp    = document.getElementById('url-display')
+    const copyMsg    = document.getElementById('copy-msg')
+    const btnStart   = document.getElementById('btn-start')
+    const btnStop    = document.getElementById('btn-stop')
+
+    // Safari and Chrome block getUserMedia on plain HTTP from a LAN IP.
+    // Only localhost (and https://) are "secure contexts" where the API exists.
+    if (!window.isSecureContext || !navigator.mediaDevices) {
+      const localhostUrl = `http://localhost:${location.port || 80}${location.pathname}${location.hash}`
+      document.body.innerHTML = `
+        <div style="max-width:520px;margin:60px auto;padding:24px;background:#1e1b2e;border-radius:12px;
+          border:1px solid rgba(255,255,255,0.1);font-family:system-ui;color:#eee;text-align:center">
+          <h2 style="color:#e94560;margin-bottom:16px">HTTPS Required</h2>
+          <p style="margin-bottom:16px;line-height:1.6">
+            Browsers block camera & microphone access on plain HTTP from LAN IPs
+            (<code>${location.hostname}</code>).
+          </p>
+          <p style="margin-bottom:20px;line-height:1.6">
+            Open this page on the <strong>same machine</strong> as the signaling server:
+          </p>
+          <a href="${localhostUrl}" style="display:inline-block;background:#e94560;color:white;
+            padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600">
+            Open via localhost
+          </a>
+          <p style="margin-top:16px;font-size:12px;color:rgba(255,255,255,0.4)">
+            The receiver can still use the LAN IP link shown there.
+          </p>
+        </div>`
+      throw new Error('insecure context — redirected')
+    }
+
+    const token = Array.from(crypto.getRandomValues(new Uint8Array(8)))
+      .map(b => b.toString(16).padStart(2, '0')).join('')
+
+    const receiverUrl = `${location.origin}/#${token}`
+    tokenDisp.textContent = token
+    urlDisp.textContent   = receiverUrl
+
+    let ws = null
+    let pc = null
+    let localStream = null
+    let reconnectTimer = null
+    let active = false
+
+    const ICE = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ]
+
+    function setStatus(text, cls) {
+      statusEl.textContent = text
+      statusEl.className = cls || 'waiting'
+    }
+
+    async function start() {
+      active = true
+      btnStart.disabled = true
+      btnStop.disabled = false
+      setStatus('Requesting camera…', 'connecting')
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        previewEl.srcObject = localStream
+      } catch (err) {
+        const msg = err.name === 'NotAllowedError'
+          ? 'Permission denied — allow camera & mic in browser settings'
+          : err.name === 'NotFoundError'
+          ? 'No camera/mic found on this device'
+          : `Camera error: ${err.name}`
+        setStatus(msg, 'error')
+        console.error('[sender-demo] getUserMedia:', err)
+        btnStart.disabled = false; btnStop.disabled = true; active = false; return
+      }
+      connect()
+    }
+
+    function stop() {
+      active = false
+      clearTimeout(reconnectTimer)
+      localStream?.getTracks().forEach(t => t.stop())
+      localStream = null
+      previewEl.srcObject = null
+      pc?.close(); pc = null
+      ws?.close(); ws = null
+      setStatus('Stopped', 'waiting')
+      btnStart.disabled = false; btnStop.disabled = true
+    }
+
+    function connect() {
+      if (!active) return
+      clearTimeout(reconnectTimer)
+      setStatus('Connecting to signaling…', 'connecting')
+
+      const wsProto = location.protocol === 'https:' ? 'wss' : 'ws'
+      ws = new WebSocket(`${wsProto}://${location.host}/ws?role=sender&token=${token}`)
+
+      ws.onopen = () => {
+        setStatus('Waiting for receiver…', 'waiting')
+        setupPC()
+      }
+
+      ws.onmessage = async (e) => {
+        let msg; try { msg = JSON.parse(e.data) } catch { return }
+        if (msg.type === 'receiver-joined') {
+          await setupPC()
+          await createOffer()
+        } else if (msg.type === 'answer') {
+          try { await pc?.setRemoteDescription({ type: 'answer', sdp: msg.sdp }) } catch {}
+        } else if (msg.type === 'ice-candidate' && msg.candidate) {
+          try { await pc?.addIceCandidate(msg.candidate) } catch {}
+        } else if (msg.type === 'peer-disconnected') {
+          setStatus('Receiver disconnected — waiting…', 'waiting')
+        }
+      }
+
+      ws.onclose = () => {
+        if (!active) return
+        setStatus('Reconnecting…', 'connecting')
+        reconnectTimer = setTimeout(connect, 3000)
+      }
+      ws.onerror = () => ws.close()
+    }
+
+    function send(obj) {
+      if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj))
+    }
+
+    async function setupPC() {
+      if (pc) { try { pc.close() } catch {} }
+      pc = new RTCPeerConnection({ iceServers: ICE })
+      localStream?.getTracks().forEach(track => pc.addTrack(track, localStream))
+
+      pc.onicecandidate = ({ candidate }) => {
+        if (candidate) send({ type: 'ice-candidate', candidate })
+      }
+      pc.onconnectionstatechange = () => {
+        const s = pc?.connectionState
+        if (s === 'connected')    setStatus('● Streaming', 'streaming')
+        if (s === 'disconnected') setStatus('Connection unstable…', 'connecting')
+        if (s === 'failed')       { setStatus('Reconnecting…', 'connecting'); setTimeout(connect, 1000) }
+      }
+    }
+
+    async function createOffer() {
+      if (!pc || !localStream) return
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      send({ type: 'offer', sdp: offer.sdp })
+    }
+
+    function flashMsg(msg) {
+      copyMsg.textContent = msg
+      setTimeout(() => { copyMsg.textContent = '' }, 2000)
+    }
+
+    function copyToken() {
+      navigator.clipboard?.writeText(token).then(() => flashMsg('Token copied!'))
+    }
+    function copyUrl() {
+      navigator.clipboard?.writeText(receiverUrl).then(() => flashMsg('URL copied!'))
+    }
+  </script>
+</body>
+</html>

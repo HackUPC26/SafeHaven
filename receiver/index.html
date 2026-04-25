@@ -10,9 +10,13 @@
 <link rel="apple-touch-icon" href="icon.svg"/>
 <link rel="manifest" href="manifest.json"/>
 <title>SafeHaven — Receiver</title>
-<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<!-- SRI integrity hashes removed: unpkg can serve subtly different bytes
+     (header tweaks, re-mins) so a cleared browser cache => SRI mismatch =>
+     React never loads => blank page. The version pin in the URL is enough
+     for the hackathon. -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body,#root{height:100%;overflow:hidden;}
@@ -32,9 +36,38 @@ body{
 @keyframes wvUp{0%,100%{transform:scaleY(.15);}50%{transform:scaleY(1);}}
 @keyframes alertPulse{0%,100%{background:rgba(255,59,92,.1);}50%{background:rgba(255,59,92,.2);}}
 @keyframes spin{to{transform:rotate(360deg);}}
+#token-overlay{
+  position:fixed;inset:0;z-index:9999;
+  background:rgba(5,8,16,.96);backdrop-filter:blur(8px);
+  display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+  padding:24px;color:#fff;font-family:-apple-system,system-ui,sans-serif;
+}
+#token-overlay.show{display:flex;}
+#token-overlay h2{font-size:18px;font-weight:600;color:#3b82f6;letter-spacing:.04em;}
+#token-overlay p{font-size:13px;color:rgba(255,255,255,.55);text-align:center;max-width:320px;line-height:1.5;}
+#token-overlay .row{display:flex;gap:8px;margin-top:6px;}
+#token-overlay input{
+  background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.15);
+  color:#fff;padding:11px 14px;border-radius:10px;font-size:13px;
+  width:240px;outline:none;font-family:ui-monospace,Menlo,monospace;
+}
+#token-overlay input:focus{border-color:#3b82f6;}
+#token-overlay button{
+  background:#3b82f6;color:#fff;border:none;padding:11px 18px;
+  border-radius:10px;cursor:pointer;font-size:13px;font-weight:600;
+}
+#token-overlay button:hover{background:#2563eb;}
 </style>
 </head>
 <body>
+<div id="token-overlay">
+  <h2>SafeHaven Receiver</h2>
+  <p>Paste the invite token from the sender device to start receiving the live stream.</p>
+  <div class="row">
+    <input id="token-input" placeholder="invite token" autocomplete="off" spellcheck="false"/>
+    <button id="token-submit">Connect</button>
+  </div>
+</div>
 <div id="root"></div>
 <script type="text/babel">
 const {useState, useEffect, useRef, useCallback, useMemo} = React;
@@ -177,6 +210,88 @@ function useIncidentState() {
   return {connected, session, tier, gps, audioLabels, incidentLog, videoAnnotation, videoFrozen, staleSecs, elapsed, riskLevel, alertMode, addEntry, setConnected, reset};
 }
 
+// ── Live MediaStream channel — set by the WebRTC signaling layer below
+function useLiveStream() {
+  const [stream, setStream] = useState(null);
+  useEffect(() => {
+    const onStream = (e) => setStream(e.detail || null);
+    window.addEventListener('safehaven:stream', onStream);
+    // Pick up a stream that arrived before mount
+    if (window.__safehavenStream) setStream(window.__safehavenStream);
+    return () => window.removeEventListener('safehaven:stream', onStream);
+  }, []);
+  return stream;
+}
+
+// Web Audio analyser tap on the live stream — drives the LIVE AUDIO bars
+// off real frequency data instead of the decorative random animation.
+// The <video> element handles audible playback; we deliberately do NOT
+// connect the analyser to ac.destination, otherwise audio plays twice.
+function useAudioLevels(stream, barCount = 44) {
+  const [levels, setLevels] = useState(null);
+  useEffect(() => {
+    if (!stream) { setLevels(null); return; }
+    const audioTracks = stream.getAudioTracks();
+    if (!audioTracks.length) { setLevels(null); return; }
+
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+
+    let ac, src, analyser, raf;
+    try {
+      ac = new Ctx();
+      src = ac.createMediaStreamSource(stream);
+      analyser = ac.createAnalyser();
+      analyser.fftSize = 128;
+      analyser.smoothingTimeConstant = 0.7;
+      src.connect(analyser);
+    } catch (err) {
+      console.warn('[audio] analyser setup failed:', err);
+      return;
+    }
+
+    // Safari ships AudioContext suspended until a user gesture. Hook a
+    // one-shot resume to the next tap so bars start animating.
+    const resume = () => { ac.resume?.(); };
+    if (ac.state === 'suspended') {
+      document.addEventListener('click', resume, { once: true, capture: true });
+      document.addEventListener('touchstart', resume, { once: true, capture: true });
+    }
+
+    const data = new Uint8Array(analyser.frequencyBinCount);
+    let last = 0;
+    function tick(t) {
+      // ~30fps is plenty for the bar UI and avoids 60fps React churn.
+      if (t - last > 33) {
+        analyser.getByteFrequencyData(data);
+        const out = new Array(barCount);
+        const binsPerBar = data.length / barCount;
+        for (let i = 0; i < barCount; i++) {
+          const start = Math.floor(i * binsPerBar);
+          const end   = Math.max(start + 1, Math.floor((i + 1) * binsPerBar));
+          let sum = 0;
+          for (let j = start; j < end; j++) sum += data[j];
+          out[i] = (sum / (end - start)) / 255;
+        }
+        setLevels(out);
+        last = t;
+      }
+      raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      try { src.disconnect(); } catch (_) {}
+      try { analyser.disconnect(); } catch (_) {}
+      try { ac.close(); } catch (_) {}
+      document.removeEventListener('click', resume, true);
+      document.removeEventListener('touchstart', resume, true);
+    };
+  }, [stream, barCount]);
+  return levels;
+}
+
 // ── GPS Map ────────────────────────────────────────────────────
 function GPSMap({gps, alertMode}) {
   const ac = alertMode ? '#ff3b5c' : '#3b82f6';
@@ -234,12 +349,78 @@ function GPSMap({gps, alertMode}) {
 }
 
 // ── Video feed ─────────────────────────────────────────────────
-function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation}) {
+function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, liveStream}) {
   const ac = alertMode ? '#ff3b5c' : '#22d3ee';
   const personCount = videoAnnotation ? videoAnnotation.personCount : null;
   const poseLabel   = videoAnnotation && videoAnnotation.poseFlags && videoAnnotation.poseFlags.length > 0
     ? videoAnnotation.poseFlags[0].replace(/_/g,' ').toUpperCase()
     : 'Standing';
+  const videoRef = useRef(null);
+  const [needsTap, setNeedsTap] = useState(false);
+
+  // When a real WebRTC MediaStream arrives, attach it to the <video> element
+  // and explicitly call play(). Browsers (esp. Safari) block autoplay-with-
+  // audio without a fresh user gesture; if play() rejects we surface a tap-
+  // to-unmute overlay so the user can grant the gesture.
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (liveStream) {
+      if (el.srcObject !== liveStream) el.srcObject = liveStream;
+      const p = el.play();
+      if (p && p.catch) {
+        p.then(() => setNeedsTap(false))
+         .catch(() => setNeedsTap(true));
+      }
+    } else if (el.srcObject) {
+      el.srcObject = null;
+      setNeedsTap(false);
+    }
+  }, [liveStream]);
+
+  function tapToPlay() {
+    const el = videoRef.current;
+    if (!el) return;
+    el.muted = false;
+    el.play().then(() => setNeedsTap(false)).catch(err => console.warn('[video] play failed:', err));
+  }
+
+  // Live-stream branch: real video covers the area; we keep only the LIVE
+  // pill, person-count chip, optional annotation overlay and corner brackets
+  // — the silhouette mock and P1/P2 boxes are dropped because they'd be
+  // misleading on top of an actual feed.
+  if (liveStream) {
+    return (
+      <div style={{position:'relative',height:280,background:'#000',overflow:'hidden',borderRadius:12,flexShrink:0}} onClick={needsTap ? tapToPlay : undefined}>
+        <video ref={videoRef} autoPlay playsInline style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+        {needsTap && (
+          <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:8,background:'rgba(5,10,20,.55)',cursor:'pointer'}}>
+            <div style={{width:44,height:44,borderRadius:'50%',background:'#3b82f6',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20}}>🔊</div>
+            <div style={{color:'#fff',fontSize:13,fontWeight:600}}>Tap to enable audio</div>
+          </div>
+        )}
+        <div style={{position:'absolute',top:10,left:10,display:'flex',alignItems:'center',gap:5,background:'rgba(5,10,20,.55)',padding:'3px 8px',borderRadius:6}}>
+          <div style={{width:7,height:7,borderRadius:'50%',background:'#ff3b5c',animation:'recBlink 1s ease-in-out infinite'}}/>
+          <span style={{color:'#fff',fontSize:10,fontWeight:700,fontFamily:'monospace',letterSpacing:1}}>LIVE</span>
+        </div>
+        {personCount != null && (
+          <div style={{position:'absolute',top:10,right:10,background:'rgba(5,10,20,.6)',borderRadius:6,padding:'4px 8px',color:ac,fontSize:10,fontWeight:700,fontFamily:'monospace'}}>
+            {`${personCount} PERSON${personCount !== 1 ? 'S' : ''}`}
+          </div>
+        )}
+        {videoAnnotation && (
+          <div style={{position:'absolute',bottom:8,left:8,background:'rgba(5,10,20,.7)',borderRadius:6,padding:'4px 8px',display:'flex',gap:8}}>
+            {[videoAnnotation.sceneContext || 'Indoor', videoAnnotation.rapidMotion ? 'Rapid motion' : 'Calm'].map(l=>(
+              <span key={l} style={{color:'rgba(255,255,255,.7)',fontSize:9,fontFamily:'monospace'}}>{l}</span>
+            ))}
+          </div>
+        )}
+        {[[0,0],[1,0],[0,1],[1,1]].map(([cx,cy],i)=>(
+          <div key={i} style={{position:'absolute',[cx?'right':'left']:8,[cy?'bottom':'top']:8,width:16,height:16,borderTop:cy?'none':`1.5px solid ${ac}`,borderBottom:cy?`1.5px solid ${ac}`:'none',borderLeft:cx?'none':`1.5px solid ${ac}`,borderRight:cx?`1.5px solid ${ac}`:'none',opacity:.7}}/>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div style={{position:'relative',height:280,background:'#080c10',overflow:'hidden',borderRadius:12,flexShrink:0}}>
@@ -312,20 +493,36 @@ function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation}) {
 }
 
 // ── Audio panel ────────────────────────────────────────────────
-function AudioPanel({alertMode, audioLabels}) {
+function AudioPanel({alertMode, audioLabels, levels}) {
   const typeColor = {impact:'#ff3b5c', shout:'#f59e0b', silence:'#475569', speech:'#3b82f6'};
+  const live = !!(levels && levels.length);
   return (
     <div style={{display:'flex',flexDirection:'column'}}>
       <div style={{background:'#080e1a',borderRadius:'12px 12px 0 0',padding:'10px 12px 8px',borderBottom:'1px solid rgba(255,255,255,.06)'}}>
         <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
           <div style={{width:6,height:6,borderRadius:'50%',background:alertMode?'#ff3b5c':'#3b82f6',animation:'recBlink 1s ease-in-out infinite'}}/>
           <span style={{color:'rgba(255,255,255,.5)',fontSize:10,fontFamily:'monospace',letterSpacing:1}}>LIVE AUDIO</span>
-          <span style={{marginLeft:'auto',color:'rgba(255,255,255,.25)',fontSize:10,fontFamily:'monospace'}}>48 kHz · mono</span>
+          <span style={{marginLeft:'auto',color:'rgba(255,255,255,.25)',fontSize:10,fontFamily:'monospace'}}>{live ? 'live · realtime' : '48 kHz · mono'}</span>
         </div>
-        <div style={{display:'flex',gap:2,alignItems:'center',height:56,overflow:'hidden'}}>
-          {WAVE_H.map((h,i)=>(
-            <div key={i} style={{flex:1,borderRadius:2,transformOrigin:'center',background:alertMode?`rgba(255,${Math.round(59+h*40)},92,${0.5+h*0.5})`:`rgba(59,130,${Math.round(200+h*55)},${0.4+h*0.6})`,animation:`wvUp ${WAVE_DUR[i]}s ease-in-out infinite alternate`,animationDelay:`${WAVE_DEL[i]}s`,height:'100%'}}/>
-          ))}
+        <div style={{display:'flex',gap:2,alignItems:'flex-end',height:56,overflow:'hidden'}}>
+          {WAVE_H.map((fallbackH, i) => {
+            const h = live ? Math.max(0.05, levels[i] ?? 0.05) : fallbackH;
+            const colorTone = Math.min(1, h);
+            const bg = alertMode
+              ? `rgba(255,${Math.round(59 + colorTone * 40)},92,${0.5 + colorTone * 0.5})`
+              : `rgba(59,130,${Math.round(200 + colorTone * 55)},${0.4 + colorTone * 0.6})`;
+            return (
+              <div key={i} style={{
+                flex:1, borderRadius:2, background:bg,
+                height: live ? `${Math.round(h * 100)}%` : '100%',
+                transformOrigin:'bottom',
+                transform: live ? 'none' : undefined,
+                transition: live ? 'height 60ms linear' : 'none',
+                animation: live ? 'none' : `wvUp ${WAVE_DUR[i]}s ease-in-out infinite alternate`,
+                animationDelay: live ? '0s' : `${WAVE_DEL[i]}s`,
+              }}/>
+            );
+          })}
         </div>
       </div>
       <div style={{background:'#080e1a',borderRadius:'0 0 12px 12px',overflowY:'auto',scrollbarWidth:'none',minHeight:60}}>
@@ -423,6 +620,8 @@ function WaitingScreen() {
 function App() {
   const {connected, session, tier, gps, audioLabels, incidentLog, videoAnnotation, videoFrozen, staleSecs, elapsed, riskLevel, alertMode, addEntry, setConnected, reset} = useIncidentState();
   const [tab, setTab] = useState('live');
+  const liveStream = useLiveStream();
+  const audioLevels = useAudioLevels(liveStream);
 
   const personName = session ? session.personName : null;
   const tierLabel  = tier > 0 ? `TIER ${tier}` : 'IDLE';
@@ -509,8 +708,8 @@ function App() {
 
         {connected && tab==='live' && (
           <div style={{display:'flex',flexDirection:'column',gap:10,animation:'slideUp .3s ease',padding:'0 14px 14px'}}>
-            <VideoFeed alertMode={alertMode} frozen={videoFrozen} staleSecs={staleSecs} videoAnnotation={videoAnnotation}/>
-            <AudioPanel alertMode={alertMode} audioLabels={audioLabels}/>
+            <VideoFeed alertMode={alertMode} frozen={videoFrozen && !liveStream} staleSecs={staleSecs} videoAnnotation={videoAnnotation} liveStream={liveStream}/>
+            <AudioPanel alertMode={alertMode} audioLabels={audioLabels} levels={audioLevels}/>
           </div>
         )}
 
@@ -586,12 +785,230 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', ()=>{
-    navigator.serviceWorker.register('./sw.js')
-      .catch(err => console.warn('SW registration failed:', err));
-  });
-}
+// SW intentionally NOT registered during the hackathon — caching the
+// receiver page caused more debugging churn than it saved. The sw.js file
+// remaining at this scope is a kill-switch that unregisters any old SW
+// the first time a stale tab loads it.
+
+</script>
+
+<!-- ── WebRTC + signaling layer ─────────────────────────────────────────────
+     Plain JS (not JSX) so it runs without Babel. It opens the receiver
+     WebSocket against the same origin that served this page (the signaling
+     server doubles as the static host), translates the sender's event
+     channel into the entry shape the React UI consumes via
+     window.addSafeHavenEntry, and pushes the live MediaStream to VideoFeed
+     through a custom event.
+-->
+<script>
+(function () {
+  const ICE = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ];
+
+  let token = (location.hash || '').replace(/^#/, '').trim();
+  let ws = null, pc = null, reconnectTimer = null, reconnectDelay = 2000;
+  let stopped = false;
+  let sessionStarted = false;
+  let lastTier = 0;
+
+  function tsOf(payload) {
+    if (payload && payload.timestamp_iso) {
+      const t = Date.parse(payload.timestamp_iso);
+      if (!Number.isNaN(t)) return t;
+    }
+    return Date.now();
+  }
+
+  function dispatchEntry(entry) {
+    window.dispatchEvent(new CustomEvent('safehaven:entry', { detail: entry }));
+  }
+
+  function setStream(stream) {
+    window.__safehavenStream = stream || null;
+    window.dispatchEvent(new CustomEvent('safehaven:stream', { detail: stream || null }));
+  }
+
+  // The polished UI gates everything behind a "session" (`incident_start`).
+  // The mobile sender doesn't currently send that event — it jumps straight
+  // to `incident_opened` / `tier_changed` — so synthesize one on first signal
+  // so the dashboard wakes up. Person name is unknown over the wire today;
+  // fall back to a tag derived from the token.
+  function ensureSession(ts, personName) {
+    if (sessionStarted) return;
+    sessionStarted = true;
+    dispatchEntry({
+      seq: 0,
+      ts,
+      type: 'incident_start',
+      payload: {
+        personName: personName || ('Sender ' + token.slice(0, 4)),
+        appVersion: 'live',
+        pubkey: token,
+      },
+    });
+  }
+
+  function translateEvent(payload) {
+    if (!payload) return;
+    const ts = tsOf(payload);
+    const t  = payload.event_type;
+
+    if (t === 'incident_opened') {
+      ensureSession(ts);
+      const toTier = payload.tier != null ? payload.tier : 1;
+      dispatchEntry({ ts, type: 'tier_change', payload: { fromTier: lastTier, toTier, trigger: 'codeword' } });
+      lastTier = toTier;
+    } else if (t === 'tier_changed') {
+      ensureSession(ts);
+      const toTier = payload.tier != null ? payload.tier : lastTier;
+      dispatchEntry({ ts, type: 'tier_change', payload: { fromTier: lastTier, toTier, trigger: 'codeword' } });
+      lastTier = toTier;
+    } else if (t === 'gps_update') {
+      ensureSession(ts);
+      dispatchEntry({
+        ts, type: 'gps',
+        payload: {
+          lat: Number(payload.lat),
+          lng: Number(payload.lng),
+          accuracy: payload.accuracy != null ? Number(payload.accuracy) : null,
+          heading:  payload.heading  != null ? Number(payload.heading)  : null,
+          speed:    payload.speed    != null ? Number(payload.speed)    : null,
+          altitude: payload.altitude != null ? Number(payload.altitude) : null,
+          address:  payload.address || null,
+        },
+      });
+    } else if (t === 'ai_label') {
+      ensureSession(ts);
+      dispatchEntry({
+        ts, type: 'ai_label',
+        payload: {
+          label: payload.label,
+          confidence: payload.confidence != null ? Number(payload.confidence) : 0.9,
+          source: payload.source || 'sender',
+        },
+      });
+    } else if (t === 'ai_video_annotation') {
+      ensureSession(ts);
+      dispatchEntry({ ts, type: 'ai_video_annotation', payload: payload.annotation || payload });
+    } else if (t === 'incident_closed' || t === 'incident_ended') {
+      dispatchEntry({
+        ts, type: 'incident_end',
+        payload: { durationMs: payload.duration_ms || payload.durationMs || 0 },
+      });
+      sessionStarted = false;
+      lastTier = 0;
+    }
+  }
+
+  function setupPC() {
+    if (pc) { try { pc.close(); } catch (_) {} pc = null; }
+    pc = new RTCPeerConnection({ iceServers: ICE });
+
+    pc.onicecandidate = ({ candidate }) => {
+      if (candidate && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ice-candidate', candidate }));
+      }
+    };
+
+    pc.ontrack = ({ streams }) => {
+      const stream = streams && streams[0];
+      if (!stream) return;
+      ensureSession(Date.now());
+      setStream(stream);
+      // Also unfreeze the video panel so any tier-2 "feed frozen" overlay
+      // disappears the moment frames start landing.
+      dispatchEntry({ ts: Date.now(), type: 'video_chunk', payload: {} });
+    };
+
+    pc.onconnectionstatechange = () => {
+      const s = pc.connectionState;
+      console.log('[recv] pc state:', s);
+      if (s === 'failed' || s === 'closed') {
+        try { pc.close(); } catch (_) {}
+        pc = null;
+        if (!stopped) reconnectTimer = setTimeout(connect, 2000);
+      }
+    };
+  }
+
+  function connect() {
+    if (stopped || !token) return;
+    clearTimeout(reconnectTimer);
+
+    const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = `${wsProto}://${location.host}/ws?role=receiver&token=${encodeURIComponent(token)}`;
+    console.log('[recv] connecting', wsUrl);
+    ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      reconnectDelay = 2000;
+      console.log('[recv] ws open');
+      setupPC();
+    };
+
+    ws.onmessage = async (e) => {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch (_) { return; }
+
+      if (msg.type === 'offer') {
+        // A fresh offer means the sender (re)joined — rebuild the PC so we
+        // don't try to renegotiate over stale ICE.
+        setupPC();
+        try {
+          await pc.setRemoteDescription({ type: msg.type, sdp: msg.sdp });
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          ws.send(JSON.stringify({ type: 'answer', sdp: answer.sdp }));
+        } catch (err) {
+          console.error('[recv] offer handling error:', err);
+        }
+      } else if (msg.type === 'ice-candidate' && msg.candidate) {
+        try { await pc.addIceCandidate(msg.candidate); } catch (_) {}
+      } else if (msg.type === 'peer-disconnected') {
+        setStream(null);
+      } else if (msg.type === 'event') {
+        translateEvent(msg.payload);
+      }
+    };
+
+    ws.onclose = (e) => {
+      console.warn('[recv] ws close', e.code, e.reason);
+      if (stopped) return;
+      reconnectTimer = setTimeout(() => {
+        reconnectDelay = Math.min(reconnectDelay * 1.5, 30000);
+        connect();
+      }, reconnectDelay);
+    };
+
+    ws.onerror = (e) => { console.error('[recv] ws error', e); try { ws.close(); } catch (_) {} };
+  }
+
+  // ── Token entry overlay ────────────────────────────────────────
+  const overlay  = document.getElementById('token-overlay');
+  const input    = document.getElementById('token-input');
+  const submit   = document.getElementById('token-submit');
+
+  function start(t) {
+    const trimmed = (t || '').trim();
+    if (!trimmed) return;
+    token = trimmed;
+    location.hash = token;
+    overlay.classList.remove('show');
+    connect();
+  }
+
+  submit.addEventListener('click', () => start(input.value));
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') start(input.value); });
+
+  if (token) {
+    connect();
+  } else {
+    overlay.classList.add('show');
+    setTimeout(() => input.focus(), 50);
+  }
+})();
 </script>
 </body>
 </html>

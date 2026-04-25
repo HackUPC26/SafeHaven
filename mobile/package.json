@@ -3,22 +3,35 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios --device",
+    "web": "expo start --web",
+    "pack:worklet": "bare-pack --linked --host ios-arm64 --host ios-arm64-simulator --host android-arm64 --out backend/worklet.bundle.mjs backend/worklet.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.1.2",
+    "b4a": "^1.8.0",
+    "bare-rpc": "^1.2.0",
+    "corestore": "^7.9.2",
     "expo": "~54.0.33",
+    "expo-camera": "~17.0.10",
     "expo-clipboard": "~7.0.1",
+    "expo-dev-client": "~6.0.20",
     "expo-linear-gradient": "~15.0.8",
     "expo-location": "~19.0.8",
     "expo-status-bar": "~3.0.9",
+    "hypercore": "^11.28.1",
+    "hyperswarm": "^4.17.0",
     "react": "19.1.0",
     "react-native": "0.81.5",
+    "react-native-bare-kit": "^0.13.3",
     "react-native-qrcode-svg": "^6.3.15",
-    "react-native-svg": "^15.9.0"
+    "react-native-svg": "^15.9.0",
+    "react-native-webrtc": "~118.0.5"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "bare-pack": "^2.0.1"
+  }
 }

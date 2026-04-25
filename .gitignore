@@ -2,3 +2,32 @@
 node_modules/
 .expo/
 package-lock.json
+.env
+.env.local
+
+# JetBrains IDEs
+.idea/
+
+# macOS
+.DS_Store
+
+# iOS build artifacts
+ios/Pods/
+ios/build/
+mobile/ios/Pods/
+mobile/ios/build/
+mobile/ios/DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Xcode signing — keep DEVELOPMENT_TEAM out of version control
+# (project.pbxproj changes are intentional if signing config changes)
+
+# LevelDB / Hypercore databases
+p2p-hello/receiver-store/
+p2p-hello/.receiver-store/
+p2p-hello/.writer-store/
+p2p-hello/storage-core/
+
+# Expo
+mobile/.expo/

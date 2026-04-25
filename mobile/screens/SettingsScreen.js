@@ -4,10 +4,8 @@ import {
   ScrollView, StyleSheet, Alert, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
-import * as Clipboard from 'expo-clipboard';
 import { saveSettings, resetSettings } from '../services/settings';
-
-const PAIRING_BASE = 'https://dashboard.safe-haven.app/#';
+import { SIGNAL_HTTP } from '../services/config';
 
 const CODEWORD_TIERS = [
   {
@@ -56,7 +54,12 @@ export default function SettingsScreen({ visible, onClose, settings, onSettingsC
   const [codewords, setCodewords] = useState({ ...settings.codewords });
   const [saved, setSaved] = useState(false);
 
-  const pairingUrl = `${PAIRING_BASE}${settings.pairingId}`;
+  // The receiver browser PWA reads the token from the URL fragment. The
+  // sender (broadcast.js) signs into the same token via App.js, which uses
+  // the pubkey half of pairingId. Show the URL whole so the operator types
+  // it verbatim into a browser — no string slicing required.
+  const streamToken = (settings.pairingId || '').split(':')[0];
+  const pairingUrl = `${SIGNAL_HTTP}/#${streamToken}`;
 
   function validateCodewords() {
     const vals = [codewords.TIER1.trim(), codewords.TIER2.trim(), codewords.TIER3.trim()];
@@ -165,9 +168,7 @@ export default function SettingsScreen({ visible, onClose, settings, onSettingsC
                   backgroundColor={colors.cardBg}
                 />
               </View>
-              <TouchableOpacity style={styles.copyBtn} onPress={handleCopyLink}>
-                <Text style={styles.copyBtnText}>Copy Pairing Link</Text>
-              </TouchableOpacity>
+              <Text selectable style={styles.tokenText}>{pairingUrl}</Text>
             </Section>
 
             {/* Save */}
@@ -421,14 +422,13 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 14,
   },
-  copyBtn: {
-    borderWidth: 1,
-    borderColor: colors.accent,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
+  tokenText: {
+    color: colors.text,
+    fontSize: 11,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    textAlign: 'center',
+    paddingVertical: 8,
   },
-  copyBtnText: { color: colors.accent, fontSize: 15, fontWeight: '600' },
 
   saveBtn: {
     marginHorizontal: 20,

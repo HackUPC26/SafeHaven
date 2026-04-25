@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { start as startWorklet, getPubkey } from './worklet-rpc';
 
 const KEYS = {
   NAME: '@safehaven:name',
@@ -6,11 +7,26 @@ const KEYS = {
   PAIRING_ID: '@safehaven:pairingId',
 };
 
-const DEFAULT_CODEWORDS = { TIER1: 'sunny', TIER2: 'cloudy', TIER3: 'storm' };
+const DEFAULT_CODEWORDS = { TIER1: 'sunny', TIER2: 'cloudy', TIER3: 'stormy' };
 
-function generatePairingId() {
-  const pubkey = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-  const encKey = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+function randomHex32() {
+  return Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+}
+
+// Real Hypercore pubkey from the worklet, paired with a random encryption key.
+// Falls back to fully random hex if the worklet isn't reachable yet (so the
+// settings screen still works pre-boot — the pairing id will be regenerated
+// next launch once the worklet comes up).
+async function generatePairingId() {
+  let pubkey;
+  try {
+    await startWorklet();
+    pubkey = await getPubkey();
+  } catch (err) {
+    console.warn('[settings] could not get worklet pubkey, falling back:', err.message ?? err);
+    pubkey = randomHex32();
+  }
+  const encKey = randomHex32();
   return `${pubkey}:${encKey}`;
 }
 
@@ -25,13 +41,13 @@ export async function loadSettings() {
     const codewords = codewordsJson ? JSON.parse(codewordsJson) : DEFAULT_CODEWORDS;
     let id = pairingId;
     if (!id) {
-      id = generatePairingId();
+      id = await generatePairingId();
       await AsyncStorage.setItem(KEYS.PAIRING_ID, id);
     }
 
     return { name: name || '', codewords, pairingId: id };
   } catch {
-    return { name: '', codewords: DEFAULT_CODEWORDS, pairingId: generatePairingId() };
+    return { name: '', codewords: DEFAULT_CODEWORDS, pairingId: await generatePairingId() };
   }
 }
 
