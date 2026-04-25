@@ -31,3 +31,6 @@ p2p-hello/storage-core/
 
 # Expo
 mobile/.expo/
+ios/SafeHaven.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+ios/.xcode.env.local
+ios/SafeHaven.xcodeproj/project.xcworkspace/contents.xcworkspacedata
