@@ -1,14 +1,15 @@
-// Not decided yet but however Tier 0 = inactive, 1 = audio+GPS, 2 = video, 3 = emergency
+// Tier 0 = inactive, 1 = audio+GPS, 2 = video, 3 = emergency
 
 import { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, ScrollView, Pressable, TextInput, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { connect, send } from './services/bridge';
+import { loadSettings } from './services/settings';
+import SettingsScreen from './screens/SettingsScreen';
 
-const CODEWORDS = { TIER1: 'sunny', TIER2: 'cloudy', TIER3: 'storm' };
+const DEFAULT_CODEWORDS = { TIER1: 'sunny', TIER2: 'cloudy', TIER3: 'storm' };
 
-// These are just the constants that will not be changed as it is the fixed display. 
 const HOURS = [
   {t:'Now',i:'☀️',c:22},{t:'13h',i:'🌤',c:23},{t:'14h',i:'⛅',c:23},
   {t:'15h',i:'🌥',c:21},{t:'16h',i:'⛅',c:20},{t:'17h',i:'☀️',c:20},
@@ -51,7 +52,14 @@ function useHold(onFire, durationMs = 3000) {
 export default function App() {
   const [tier, setTier] = useState(0);
   const [sent, setSent] = useState(false);
+  const [settings, setSettings] = useState({ name: '', codewords: DEFAULT_CODEWORDS, pairingId: '' });
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const locationRef = useRef(null);
+
+  useEffect(() => {
+    connect();
+    loadSettings().then(s => setSettings(s));
+  }, []);
 
   // SOS trigger — hold H/L row 3s
   const sos = useHold(() => {
@@ -63,8 +71,6 @@ export default function App() {
     }
   }, 3000);
 
-  useEffect(() => { connect(); }, []);
-
   useEffect(() => {
     if (tier >= 1) startGPS();
     if (tier === 0) stopGPS();
@@ -72,9 +78,10 @@ export default function App() {
 
   function checkCodeword(text) {
     const word = text.toLowerCase().trim();
-    if (word === CODEWORDS.TIER1 && tier === 0) { setTier(1); send({ event_type: 'tier_changed', tier: 1 }); }
-    if (word === CODEWORDS.TIER2 && tier === 1) { setTier(2); send({ event_type: 'tier_changed', tier: 2 }); }
-    if (word === CODEWORDS.TIER3 && tier === 2) { setTier(3); send({ event_type: 'tier_changed', tier: 3 }); }
+    const cw = settings.codewords;
+    if (word === cw.TIER1 && tier === 0) { setTier(1); send({ event_type: 'tier_changed', tier: 1 }); }
+    if (word === cw.TIER2 && tier === 1) { setTier(2); send({ event_type: 'tier_changed', tier: 2 }); }
+    if (word === cw.TIER3 && tier === 2) { setTier(3); send({ event_type: 'tier_changed', tier: 3 }); }
   }
 
   async function startGPS() {
@@ -90,90 +97,110 @@ export default function App() {
     if (locationRef.current) { locationRef.current.remove(); locationRef.current = null; }
   }
 
+  function handleSettingsClose(opts) {
+    setSettingsOpen(false);
+    if (opts?.reset) {
+      loadSettings().then(s => setSettings(s));
+    }
+  }
+
   const bgColor = sos.progress.interpolate({ inputRange: [0, 1], outputRange: ['transparent', 'rgba(255,255,255,0.15)'] });
 
   return (
-    <LinearGradient colors={['#1a6da8','#3a9fd6','#6ac4ee','#a8dff5']} style={styles.flex}>
-      <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
-        <View style={styles.topPad} />
+    <>
+      <LinearGradient colors={['#1a6da8','#3a9fd6','#6ac4ee','#a8dff5']} style={styles.flex}>
+        <ScrollView style={styles.flex} showsVerticalScrollIndicator={false}>
+          <View style={styles.topPad} />
 
-        {/* City + temp */}
-        <View style={styles.center}>
-          <Text style={styles.city}>Barcelona</Text>
-          <Text style={styles.temp}>22°</Text>
-          <Text style={styles.desc}>Mostly Sunny</Text>
-
-          {/* H/L row — SOS trigger (hold 3s) */}
-          <Animated.View style={[styles.hlRow, { backgroundColor: bgColor }]}>
-            <Pressable
-              onPressIn={sos.begin}
-              onPressOut={sos.cancel}
-              style={styles.hlPressable}
-            >
-              <Text style={styles.hlText}>H:24°  L:15°</Text>
+          {/* City + temp — long-press 2s opens hidden settings */}
+          <View style={styles.center}>
+            <Pressable onLongPress={() => setSettingsOpen(true)} delayLongPress={2000}>
+              <Text style={styles.city}>Barcelona</Text>
             </Pressable>
-          </Animated.View>
-        </View>
+            <Text style={styles.temp}>22°</Text>
+            <Text style={styles.desc}>Mostly Sunny</Text>
 
-        {/* tiny status dot */}
-        {tier > 0 && (
-          <View style={[styles.dot, tier === 3 ? styles.dotRed : styles.dotOrange]} />
-        )}
+            {/* H/L row — SOS trigger (hold 3s) */}
+            <Animated.View style={[styles.hlRow, { backgroundColor: bgColor }]}>
+              <Pressable
+                onPressIn={sos.begin}
+                onPressOut={sos.cancel}
+                style={styles.hlPressable}
+              >
+                <Text style={styles.hlText}>H:24°  L:15°</Text>
+              </Pressable>
+            </Animated.View>
+          </View>
 
-        {/* silent sent flash */}
-        {sent && <View style={styles.sentFlash} />}
+          {/* tiny status dot */}
+          {tier > 0 && (
+            <View style={[styles.dot, tier === 3 ? styles.dotRed : styles.dotOrange]} />
+          )}
 
-        {/* hidden codeword input */}
-        <TextInput
-          style={styles.hiddenInput}
-          onChangeText={checkCodeword}
-          placeholder="Search weather..."
-          placeholderTextColor="rgba(255,255,255,0.4)"
-        />
+          {/* silent sent flash */}
+          {sent && <View style={styles.sentFlash} />}
 
-        {/* hourly strip */}
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>UV INDEX 6 · FEELS LIKE 24°</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            {HOURS.map((h, i) => (
-              <View key={i} style={styles.hourItem}>
-                <Text style={styles.hourTime}>{h.t}</Text>
-                <Text style={styles.hourIcon}>{h.i}</Text>
-                <Text style={styles.hourTemp}>{h.c}°</Text>
+          {/* hidden codeword input */}
+          <TextInput
+            style={styles.hiddenInput}
+            onChangeText={checkCodeword}
+            placeholder="Search weather..."
+            placeholderTextColor="rgba(255,255,255,0.4)"
+          />
+
+          {/* hourly strip */}
+          <View style={styles.card}>
+            <Text style={styles.cardLabel}>UV INDEX 6 · FEELS LIKE 24°</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              {HOURS.map((h, i) => (
+                <View key={i} style={styles.hourItem}>
+                  <Text style={styles.hourTime}>{h.t}</Text>
+                  <Text style={styles.hourIcon}>{h.i}</Text>
+                  <Text style={styles.hourTemp}>{h.c}°</Text>
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+
+          {/* 10-day */}
+          <View style={[styles.card, styles.mt12]}>
+            <Text style={styles.cardLabel}>10-DAY FORECAST</Text>
+            {DAYS.map((d, i) => (
+              <View key={i} style={[styles.dayRow, i > 0 && styles.dayBorder]}>
+                <Text style={styles.dayName}>{d.d}</Text>
+                <Text style={styles.dayIcon}>{d.i}</Text>
+                <Text style={styles.dayLo}>{d.lo}°</Text>
+                <View style={styles.dayBar} />
+                <Text style={styles.dayHi}>{d.hi}°</Text>
               </View>
             ))}
-          </ScrollView>
-        </View>
+          </View>
 
-        {/* 10-day */}
-        <View style={[styles.card, styles.mt12]}>
-          <Text style={styles.cardLabel}>10-DAY FORECAST</Text>
-          {DAYS.map((d, i) => (
-            <View key={i} style={[styles.dayRow, i > 0 && styles.dayBorder]}>
-              <Text style={styles.dayName}>{d.d}</Text>
-              <Text style={styles.dayIcon}>{d.i}</Text>
-              <Text style={styles.dayLo}>{d.lo}°</Text>
-              <View style={styles.dayBar} />
-              <Text style={styles.dayHi}>{d.hi}°</Text>
-            </View>
-          ))}
-        </View>
+          {/* extra cards grid */}
+          <View style={styles.grid}>
+            {[['HUMIDITY','62%','Dew point 14°'],['VISIBILITY','24 km','Perfectly clear'],
+              ['WIND','14 km/h','NE — sea breeze'],['UV INDEX','6','High. Wear sunscreen']].map(([l,v,s],i)=>(
+              <View key={i} style={styles.miniCard}>
+                <Text style={styles.miniLabel}>{l}</Text>
+                <Text style={styles.miniVal}>{v}</Text>
+                <Text style={styles.miniSub}>{s}</Text>
+              </View>
+            ))}
+          </View>
 
-        {/* extra cards grid */}
-        <View style={styles.grid}>
-          {[['HUMIDITY','62%','Dew point 14°'],['VISIBILITY','24 km','Perfectly clear'],
-            ['WIND','14 km/h','NE — sea breeze'],['UV INDEX','6','High. Wear sunscreen']].map(([l,v,s],i)=>(
-            <View key={i} style={styles.miniCard}>
-              <Text style={styles.miniLabel}>{l}</Text>
-              <Text style={styles.miniVal}>{v}</Text>
-              <Text style={styles.miniSub}>{s}</Text>
-            </View>
-          ))}
-        </View>
+          <View style={styles.bottomPad} />
+        </ScrollView>
+      </LinearGradient>
 
-        <View style={styles.bottomPad} />
-      </ScrollView>
-    </LinearGradient>
+      {settingsOpen && (
+        <SettingsScreen
+          visible={settingsOpen}
+          onClose={handleSettingsClose}
+          settings={settings}
+          onSettingsChange={updated => setSettings(prev => ({ ...prev, ...updated }))}
+        />
+      )}
+    </>
   );
 }
 
