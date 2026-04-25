@@ -106,18 +106,36 @@ unconditionally and survives app restarts.
 
 ## Installation
 
-### Prerequisites
+> Expo Go does **not** work — `react-native-webrtc` and `react-native-bare-kit`
+> need a custom dev client. The first build has to go through Xcode.
+
+### 0. Prerequisites
+
+System:
 
 - macOS (for iOS builds) — Linux/Windows works for the signaling server +
   receiver browser only
 - Node.js ≥ 20 and npm
-- Xcode 15+ with the iOS 17 simulator runtime, or a physical iPhone with a
-  paired Apple Developer account
-- CocoaPods (`sudo gem install cocoapods` or via Homebrew)
-- Expo CLI ships with the project; no global install needed
+- A physical iPhone (recommended for camera + mic + GPS) **or** an iOS
+  simulator runtime
 
-> Expo Go does **not** work — `react-native-webrtc` and `react-native-bare-kit`
-> need a custom dev client. Use `npx expo run:ios` for the first build.
+First-time-only macOS / Xcode setup (skip what you already have):
+
+1. **Install Xcode** from the Mac App Store (≥ 15). Open it once so it
+   finishes the post-install components dance.
+2. **Install Xcode command-line tools**: `xcode-select --install`
+3. **Accept the Xcode license**: `sudo xcodebuild -license accept`
+4. **Install an iOS simulator runtime** (recent Xcode ships without one):
+   Xcode → Settings → Platforms → click the **+** next to iOS → install
+   the latest iOS runtime. *(Skip if you'll only build to a physical iPhone.)*
+5. **Install CocoaPods**: `sudo gem install cocoapods`
+   (or `brew install cocoapods` if you prefer Homebrew)
+6. **For physical-device builds, sign in to Xcode with an Apple ID:**
+   Xcode → Settings → Accounts → **+** → Apple ID. A free Apple ID is
+   enough for development; no paid Developer Program needed.
+7. **Trust the developer profile on the iPhone** the first time you
+   install: iPhone Settings → General → VPN & Device Management → tap
+   your Apple ID → Trust. Until you do, the app crashes on launch.
 
 ### 1. Clone and install JS deps
 
@@ -142,7 +160,12 @@ Expo modules into the Xcode project.
 ```bash
 cd ../mobile/ios
 pod install
+cd ..
 ```
+
+If `pod install` fails with "no such xcode" or signing errors, run
+`sudo xcode-select -s /Applications/Xcode.app/Contents/Developer` once
+to point CocoaPods at the right Xcode.
 
 ### 3. (Optional) Re-pack the Bare Worklet bundle
 
@@ -150,35 +173,56 @@ A prebuilt `mobile/backend/worklet.bundle.mjs` is checked in, so this step
 is only needed if you change `mobile/backend/worklet.js`.
 
 ```bash
-cd mobile
+# from mobile/
 npm run pack:worklet
 ```
 
-### 4. First iOS build (Xcode)
+### 4. First iOS build
 
-Plug in an iPhone (recommended for camera + mic + GPS) or use the simulator.
+Plug in an iPhone (unlock + trust the laptop) or pick a simulator.
 
 ```bash
-cd mobile
-npx expo run:ios --device      # physical device
+# from mobile/
+npx expo run:ios --device      # physical iPhone
 # or:
 npx expo run:ios               # simulator
 ```
 
-The first build takes 5–10 minutes (Pods, RN, native modules). After it
-finishes, the SafeHaven dev client is installed on the device.
+The first build takes 5–10 minutes (Pods, RN, native modules). When it
+finishes, the **SafeHaven** dev client is installed on the device.
 
-For subsequent runs you only need Metro:
+**If the build fails with a code-signing error**, open the Xcode workspace
+and set a team:
+
+1. `open mobile/ios/mobile.xcworkspace` (NOT `.xcodeproj`).
+2. Select the **mobile** target → **Signing & Capabilities** tab.
+3. Tick **Automatically manage signing** and pick your Apple ID team in
+   **Team**. Xcode generates a development bundle ID for you.
+4. Re-run `npx expo run:ios --device`.
+
+You can also use Xcode UI for the whole build: open the workspace, pick
+your device in the toolbar, hit ▶. Metro still has to be running
+separately (next step).
+
+### 5. Subsequent runs (no rebuild needed)
+
+After the first build, you only need Metro running on the laptop. The
+dev client app on the phone connects to it.
 
 ```bash
-cd mobile
-npx expo start --dev-client    # then press 'i' or open the dev client app
+# from mobile/
+npx expo start --dev-client
+# press 'i' to open the simulator, or just open the dev client app on the phone
 ```
 
-If you'd rather build from Xcode UI: open `mobile/ios/mobile.xcworkspace`
-(NOT `.xcodeproj`), select your device, hit ▶.
+You only need to repeat step 4 (`expo run:ios`) when:
 
-### 5. Configure the signaling host (usually unneeded)
+- You change `mobile/package.json` and the new dep is a native module.
+- You change anything in `mobile/ios/` (Info.plist, entitlements, etc.).
+- You re-run `npm run pack:worklet`.
+- The dev client crashes on launch with native-module errors.
+
+### 6. Configure the signaling host (usually unneeded)
 
 In dev, the mobile app reads Metro's bundler URL and reuses that IP with
 port `8080` automatically. No `.env` is required for the standard LAN demo.
