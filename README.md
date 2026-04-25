@@ -41,6 +41,18 @@ The MVP flow from the BMAD docs:
 | 2 | Escalated | Add live video |
 | 3 | Emergency | High-priority alert and call-assist UX |
 
+## Short Demo Script
+
+Use this script for a 2 minute walkthrough:
+
+1. Show that the sender app opens as a normal weather screen.
+2. Trigger Tier 1 and explain that the trusted contact receives location and
+   incident status.
+3. Escalate to Tier 2 and explain the planned video evidence path.
+4. Escalate to Tier 3 and show the call-assist receiver state.
+5. Point out that the long-term goal is encrypted P2P delivery, not cloud
+   storage of sensitive incident data.
+
 ## Components
 
 | Component | Directory | Description |
