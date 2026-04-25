@@ -75,6 +75,18 @@ The repo's runnable prototype uses WebSocket and Autopass bridge pieces while
 the final no-server browser replication path is validated. Treat bridge
 endpoints as hackathon spikes, not the final privacy architecture.
 
+## Current Demo Data Flow
+
+The current prototype is useful for showing the product loop before the final
+Bare Worklet path is complete:
+
+1. The mobile app creates an incident or tier/location update.
+2. `mobile/services/bridge.js` sends the event to the local WebSocket bridge.
+3. `p2p-hello/` receives the event and writes it into the P2P demo path.
+4. The receiver side watches the stream and shows the latest incident context.
+5. The BMAD target replaces the local bridge with encrypted Hypercore
+   replication between sender and receiver.
+
 ## Running The Prototype
 
 ### Demo Checklist
