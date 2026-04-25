@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Receiver PWA",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "receiver"],
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "Mobile (Expo)",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "mobile", "start"],
+      "port": 8081
+    }
+  ]
+}
