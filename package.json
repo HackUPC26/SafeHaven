@@ -1,0 +1,33 @@
+{
+  "name": "safehaven",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo run:ios",
+    "android": "expo run:android",
+    "pack-worklet": "bare-pack backend/worklet.mjs -o backend/worklet.bundle.js",
+    "preios": "npm run pack-worklet",
+    "preandroid": "npm run pack-worklet",
+    "expo:prebuild": "npm run pack-worklet && npx expo prebuild"
+  },
+  "dependencies": {
+    "b4a": "^1.6.7",
+    "babel-preset-expo": "^55.0.18",
+    "bare-rpc": "^1.2.0",
+    "corestore": "^7.9.2",
+    "expo": "~55.0.17",
+    "expo-status-bar": "~2.2.0",
+    "hypercore": "^11.28.1",
+    "hyperswarm": "^4.17.0",
+    "react": "19.0.0",
+    "react-native": "0.79.0",
+    "react-native-bare-kit": "^0.13.3"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.0",
+    "@types/react": "~19.0.0",
+    "bare-pack": "^2.0.1",
+    "typescript": "~5.5.4"
+  }
+}

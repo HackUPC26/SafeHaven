@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "SafeHaven",
+    "slug": "safehaven",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.safehaven.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "SafeHaven records video evidence during incidents.",
+        "NSMicrophoneUsageDescription": "SafeHaven records audio evidence and detects distress sounds.",
+        "NSLocationWhenInUseUsageDescription": "SafeHaven tracks your location to share with your trusted contact.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "SafeHaven tracks your location during an active incident.",
+        "NSSpeechRecognitionUsageDescription": "SafeHaven listens for your safety codeword to start an incident."
+      }
+    },
+    "android": { "package": "com.safehaven.app" },
+    "plugins": ["react-native-bare-kit"]
+  }
+}
