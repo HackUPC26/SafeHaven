@@ -223,6 +223,17 @@ The BMAD stories prioritize the riskiest implementation path first:
 
 Key story file: `_bmad-output/planning-artifacts/SafeHaven-Epics-and-Stories.md`.
 
+### Immediate Next Tasks
+
+For the next coding session, a practical order is:
+
+1. Confirm the current mobile-to-bridge event path still works.
+2. Connect the receiver PWA to the same live event stream used by the demo.
+3. Add one deterministic sample event for each tier so the dashboard can be
+   tested without a phone.
+4. Keep the WebSocket bridge clearly marked as a prototype-only path.
+5. Start replacing bridge behavior with the BMAD Hypercore replication story.
+
 ## Safety And Privacy Notes
 
 - This is a prototype, not a production emergency service.
