@@ -9,6 +9,20 @@ incident timeline, and planned audio/video/AI evidence.
 This README combines the current runnable prototype notes with the BMAD planning
 artifacts in `_bmad-output/planning-artifacts/`.
 
+## Quick Version
+
+SafeHaven is a safety demo with two sides:
+
+- The sender side is a mobile app that looks like a normal weather app.
+- The receiver side is a browser dashboard for a trusted contact.
+- The current prototype sends status and location events through a local bridge.
+- The target BMAD architecture replaces the bridge with encrypted P2P incident
+  replication.
+
+For a hackathon demo, the easiest path is to run the bridge, start the mobile
+app, open the receiver PWA, then trigger an incident from the disguised weather
+screen.
+
 ## Product Scope
 
 The MVP flow from the BMAD docs:
