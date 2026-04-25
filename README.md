@@ -197,6 +197,18 @@ cd receiver && python3 -m http.server 3000
 cd mobile && npm start
 ```
 
+### Troubleshooting
+
+If the demo does not connect, check these first:
+
+- Make sure the phone and laptop are on the same network.
+- Replace `<your-local-ip>` with the laptop IP address, not `localhost`, when
+  testing on a physical phone.
+- Confirm the bridge process is running before opening the mobile app.
+- Allow location permission in the mobile app when Tier 1 starts.
+- Restart the P2P sender and receiver if the invite key has already been used.
+- Delete local P2P storage folders only when you want to reset the pairing demo.
+
 ## BMAD Build Backlog
 
 The BMAD stories prioritize the riskiest implementation path first:
