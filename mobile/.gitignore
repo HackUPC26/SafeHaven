@@ -36,6 +36,19 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-# generated native folders
-/ios
-/android
+# iOS — track the project + Podfile + source, ignore generated/build artifacts.
+# (App.json has no plugins, so Info.plist permission strings only live here —
+# don't blanket-ignore /ios or first-time clones lose camera/mic/location.)
+ios/Pods/
+ios/build/
+ios/DerivedData/
+ios/.xcode.env.local
+ios/**/xcuserdata/
+ios/**/*.xcuserstate
+
+# Android — same pattern: keep gradle config, ignore build output.
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/**/*.iml

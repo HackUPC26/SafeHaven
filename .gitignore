@@ -1,7 +1,6 @@
 .opencode
 node_modules/
 .expo/
-package-lock.json
 .env
 .env.local
 
@@ -11,26 +10,10 @@ package-lock.json
 # macOS
 .DS_Store
 
-# iOS build artifacts
-ios/Pods/
-ios/build/
+# iOS build artifacts (mobile/.gitignore covers most; these are belt-and-braces)
 mobile/ios/Pods/
 mobile/ios/build/
 mobile/ios/DerivedData/
+mobile/ios/Podfile.lock
 *.xcuserstate
 xcuserdata/
-
-# Xcode signing — keep DEVELOPMENT_TEAM out of version control
-# (project.pbxproj changes are intentional if signing config changes)
-
-# LevelDB / Hypercore databases
-p2p-hello/receiver-store/
-p2p-hello/.receiver-store/
-p2p-hello/.writer-store/
-p2p-hello/storage-core/
-
-# Expo
-mobile/.expo/
-ios/SafeHaven.xcodeproj/project.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
-ios/.xcode.env.local
-ios/SafeHaven.xcodeproj/project.xcworkspace/contents.xcworkspacedata
