@@ -21,6 +21,9 @@ SafeHaven combines:
 - Trusted-contact browser dashboard (no app install)
 - Tamper-evident incident log and evidence export flow
 
+### PEARS Sponsor Track
+SafeHaven is built on the **Pear protocol** (Hypercore + Hyperswarm + Bare runtime) to compete in the PEARS sponsor track. All incident data is transmitted exclusively peer-to-peer between the sender's iPhone and the trusted contact's browser. No cloud backend stores or proxies sensitive data. The only server is a static file host that delivers the receiver PWA bundle once on first load.
+
 ## Target Users
 - Primary: people at risk of intimate partner violence and coercive control
 - Secondary: people walking alone at night, students, travelers, elderly users
@@ -64,19 +67,60 @@ Receiver (browser dashboard):
 
 ### Dashboard Delivery Model
 One-time bootstrap:
-- Browser requests static dashboard bundle (HTML/CSS/JS) from static server
-- After load, sensitive incident flow is peer-to-peer
+- Browser requests static dashboard bundle (HTML/CSS/JS) from static server (CDN or GitHub Pages)
+- After load, sensitive incident flow is exclusively peer-to-peer — the static server is never contacted again
 
 Runtime model:
-- Browser JS <-> Hyperswarm network <-> Sender iPhone peer
+- Browser JS ↔ `hyperdht` browser build ↔ Holepunch public DHT bootstrap nodes (peer discovery only) ↔ Sender iPhone peer
+- Actual incident data flows directly browser ↔ iPhone via WebRTC data channels (Noise-encrypted)
 - Incident data buffered in memory and IndexedDB for session continuity
 - Explicit user action required for durable evidence export/download
+
+### Receiver Dashboard Elements (Browser PWA)
+- **Live video feed** with AI annotation overlays (person count, posture, scene context). Last frame + annotations persist with staleness timestamp if feed freezes.
+- **Audio label rail** — scrolling timeline of AI audio labels, timestamped and colour-coded: red for IMPACT/SCREAMING, amber for SHOUTING, grey for SILENCE.
+- **Live GPS map** — pin, address, coordinates, movement trail.
+- **AI risk assessment banner** — synthesises all signals: green / amber / red with actionable guidance text.
+- **Incident timeline** — chronological colour-coded events (tier changes, AI triggers, GPS updates).
+- **"Call Police with Location"** — primary action button, large, red, always visible, pre-loaded with live GPS coordinates.
+- **"Save Evidence"** — secondary button, packages session data for download.
+- **Session header** — person's name, active tier badge, session duration, P2P connection status.
 
 ## Privacy and Evidence Model
 - Append-only incident log for tamper-evident chronology
 - Default minimize-retention posture (session-first)
 - Post-incident persistence is explicit and intentional (Save Evidence action)
 - Evidence package includes timeline + metadata + associated media references/chunks
+
+### Evidence Vault
+During an incident, the Hypercore log builds the evidence trail automatically. Every entry is cryptographically chained — audio chunks, video chunks, AI labels, GPS coordinates, tier changes — all timestamped and signed in the append-only log. This structure is inherently tamper-evident, making it viable for legal proceedings.
+
+Post-incident, the trusted contact clicks **"Save Evidence"** to download:
+- Full Hypercore session export (NDJSON timeline)
+- Associated media chunk references
+- AI label log with timestamps and confidence scores
+- GPS track (coordinates + timestamps)
+- PDF evidence report: timestamps, coordinates, AI labels, and key video frames
+
+Nothing persists on the receiver's device without this explicit consent action.
+
+## Onboarding and Pairing Flow
+
+### First-time Setup (Sender)
+1. User installs SafeHaven (bare-expo app).
+2. App runs onboarding: choose disguise skin, configure 3 codewords, set trusted contact.
+3. App generates an incident keypair (Hypercore public key + shared encryption key).
+4. App shows a **QR code** and a **shareable link** (`https://dashboard.safe-haven.app/#<pubkey>:<encryptionKey>`).
+   - The `#fragment` is never sent to the static server.
+5. User sends the link/QR to their trusted contact via any channel (SMS, email, messaging app).
+6. Setup guidance for Back Tap or Action Button as a hidden activation shortcut.
+
+### Trusted Contact Setup (Receiver)
+1. Contact opens the shared link in any modern browser.
+2. Browser downloads the static PWA bundle once.
+3. Browser reads the keypair from the URL fragment (client-side only).
+4. Dashboard enters standby mode — shows "Waiting for connection."
+5. When an incident starts, the browser auto-connects via Hyperswarm DHT and begins replicating.
 
 ## Neural Engine AI Layers
 1. Auto-trigger from sound classification
