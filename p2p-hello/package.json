@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "autopass": "^3.4.1",
-    "corestore": "^7.4.5"
+    "corestore": "^7.4.5",
+    "ws": "^8.20.0"
   }
 }

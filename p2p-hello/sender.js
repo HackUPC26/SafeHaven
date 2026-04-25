@@ -1,7 +1,7 @@
 import Corestore from 'corestore'
 import Autopass from 'autopass'
-import readline from 'readline'
 import process from 'process'
+import { WebSocketServer } from 'ws'
 
 async function main () {
   const store = new Corestore('./storage-sender')
@@ -13,20 +13,33 @@ async function main () {
   console.log('=== SENDER ===')
   console.log('Invite:', invite)
   console.log('Share that with the receiver: node receiver.js <invite>')
-  console.log('Press ENTER to add a "hello world" entry. Ctrl+C to quit.')
   console.log()
 
   pass.on('update', () => {
     console.log('[update] writers/entries changed')
   })
 
-  let counter = 0
-  const rl = readline.createInterface({ input: process.stdin })
-  rl.on('line', async () => {
-    const key = `hello-${counter++}`
-    const value = JSON.stringify({ text: 'hello world', time: new Date().toISOString() })
-    await pass.add(key, value)
-    console.log('[sent]', key, value)
+  // WebSocket server — listens for events from the iPhone app
+  const wss = new WebSocketServer({ port: 8080 })
+  console.log('WebSocket server listening on port 8080')
+
+  wss.on('connection', (socket) => {
+    console.log('[bridge] Phone connected')
+
+    socket.on('message', async (data) => {
+      const event = JSON.parse(data)
+      console.log('[bridge] Got event:', event)
+
+      // write every phone event into the autopass log
+      const key = `event-${Date.now()}`
+      const value = JSON.stringify(event)
+      await pass.add(key, value)
+      console.log('[sent to autopass]', key, event.event_type)
+    })
+
+    socket.on('close', () => {
+      console.log('[bridge] Phone disconnected')
+    })
   })
 
   process.on('SIGINT', async () => {
