@@ -7,4 +7,10 @@ const config = getDefaultConfig(__dirname)
 // which is what we want and what was already working.
 config.resolver.unstable_enablePackageExports = false
 
+// Ensure Metro can import the bare-pack output (.bundle.mjs) — which is just
+// a default-exported string — and treat it as a regular source module.
+if (!config.resolver.sourceExts.includes('mjs')) {
+  config.resolver.sourceExts.push('mjs')
+}
+
 module.exports = config

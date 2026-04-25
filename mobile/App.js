@@ -5,10 +5,16 @@ import {
 } from 'react-native'
 import { RTCView } from 'react-native-webrtc'
 import * as Location from 'expo-location'
-import { connect as bridgeConnect, send as bridgeSend } from './services/bridge'
 import { startBroadcast, stopBroadcast, getLocalStream } from './services/broadcast'
 import { startReceiving, stopReceiving } from './services/receive'
 import { SIGNAL_HTTP } from './services/config'
+import {
+  ping as workletPing,
+  getPubkey as workletGetPubkey,
+  getLength as workletGetLength,
+  appendEntry as workletAppendEntry,
+  joinSwarm as workletJoinSwarm,
+} from './services/worklet-rpc'
 
 const CODEWORDS = { TIER1: 'sunny', TIER2: 'cloudy', TIER3: 'storm' }
 
@@ -48,8 +54,28 @@ export default function App() {
 
   const locationRef = useRef(null)
 
-  // Connect legacy event bridge on mount
-  useEffect(() => { bridgeConnect() }, [])
+  // Boot the Bare worklet and log its pubkey so a receiver can tail it
+  useEffect(() => {
+    (async () => {
+      try {
+        await workletPing()
+        const pubkey = await workletGetPubkey()
+        console.log('[worklet] core pubkey:', pubkey)
+        const length = await workletGetLength()
+        console.log('[worklet] core length:', length)
+      } catch (err) {
+        console.error('[worklet] boot failed:', err)
+      }
+    })()
+  }, [])
+
+  // Join the Hyperswarm DHT once an incident is open
+  useEffect(() => {
+    if (tier < 1) return
+    workletJoinSwarm()
+      .then((topic) => console.log('[worklet] swarm joined topic:', topic))
+      .catch((err) => console.error('[worklet] joinSwarm failed:', err))
+  }, [tier >= 1])
 
   // Start/stop broadcast based on tier
   useEffect(() => {
@@ -76,8 +102,13 @@ export default function App() {
     else           stopGPS()
   }, [tier])
 
+  function logEvent(event) {
+    workletAppendEntry({ ...event, ts: new Date().toISOString() })
+      .catch((err) => console.error('[worklet] append failed:', err))
+  }
+
   function activate() {
-    if (tier === 0) { setTier(1); bridgeSend({ event_type: 'incident_opened', tier: 1 }) }
+    if (tier === 0) { setTier(1); logEvent({ event_type: 'incident_opened', tier: 1 }) }
   }
 
   function checkCodeword(text) {
@@ -97,9 +128,9 @@ export default function App() {
       return
     }
 
-    if (word === CODEWORDS.TIER1 && tier === 0) { setTier(1); bridgeSend({ event_type: 'tier_changed', tier: 1 }) }
-    if (word === CODEWORDS.TIER2 && tier === 1) { setTier(2); bridgeSend({ event_type: 'tier_changed', tier: 2 }) }
-    if (word === CODEWORDS.TIER3 && tier === 2) { setTier(3); bridgeSend({ event_type: 'tier_changed', tier: 3 }) }
+    if (word === CODEWORDS.TIER1 && tier === 0) { setTier(1); logEvent({ event_type: 'tier_changed', tier: 1 }) }
+    if (word === CODEWORDS.TIER2 && tier === 1) { setTier(2); logEvent({ event_type: 'tier_changed', tier: 2 }) }
+    if (word === CODEWORDS.TIER3 && tier === 2) { setTier(3); logEvent({ event_type: 'tier_changed', tier: 3 }) }
   }
 
   function exitReceiverMode() {
@@ -114,7 +145,7 @@ export default function App() {
     if (status !== 'granted') return
     locationRef.current = await Location.watchPositionAsync(
       { timeInterval: 5000, distanceInterval: 5 },
-      (loc) => bridgeSend({ event_type: 'gps_update', lat: loc.coords.latitude, lng: loc.coords.longitude }),
+      (loc) => logEvent({ event_type: 'gps_update', lat: loc.coords.latitude, lng: loc.coords.longitude }),
     )
   }
 
