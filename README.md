@@ -77,6 +77,19 @@ endpoints as hackathon spikes, not the final privacy architecture.
 
 ## Running The Prototype
 
+### Demo Checklist
+
+Use this checklist when preparing a quick demo:
+
+- Start the P2P socket server first.
+- Copy the invite key printed by the sender process.
+- Start the P2P receiver with that invite key.
+- Serve the receiver PWA in a browser tab.
+- Start the mobile app with Expo.
+- Confirm the phone can reach the bridge IP and port.
+- Trigger Tier 1 from the disguised weather screen.
+- Confirm the receiver shows the new tier and location events.
+
 Prerequisites:
 
 - Node.js and npm
