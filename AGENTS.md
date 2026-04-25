@@ -23,3 +23,4 @@ Important BMAD commands:
 - bmad-create-story
 - bmad-dev-story
 - bmad-code-review
+bmad-agent-dev
