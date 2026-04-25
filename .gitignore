@@ -24,6 +24,9 @@ xcuserdata/
 
 # LevelDB / Hypercore databases
 p2p-hello/receiver-store/
+p2p-hello/.receiver-store/
+p2p-hello/.writer-store/
+p2p-hello/storage-core/
 
 # Expo
 mobile/.expo/

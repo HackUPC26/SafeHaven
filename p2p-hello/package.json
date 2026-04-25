@@ -3,21 +3,11 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Minimal Autopass hello-world for SafeHaven.",
+  "description": "SafeHaven WebRTC signaling server + receiver static host.",
   "scripts": {
-    "sender": "node sender.js",
-    "receiver": "node receiver.js",
-    "signal": "node signaling.js",
-    "receiver-hyper": "node receiver-hyper.js",
-    "writer-test": "node local-writer-test.js",
-    "smoke:hyper": "node smoke-hyper.js"
+    "signal": "node signaling.js"
   },
   "dependencies": {
-    "autopass": "^3.4.1",
-    "b4a": "^1.8.0",
-    "corestore": "^7.4.5",
-    "hypercore": "^11.28.1",
-    "hyperswarm": "^4.17.0",
     "ws": "^8.20.0"
   }
 }

@@ -142,12 +142,12 @@ npm run android
 npm run ios
 ```
 
-<<<<<<< Updated upstream
-Before testing on a physical device, update `mobile/services/bridge.js` if
-needed so `RELAY_URL` points at your development machine:
+The mobile app auto-detects the laptop's LAN IP from Metro's bundler URL, so
+no `.env` changes are needed for the standard LAN demo. Override only when
+running outside Metro (release build, signaling on another machine):
 
-```js
-const RELAY_URL = 'ws://<your-local-ip>:8080';
+```bash
+echo "EXPO_PUBLIC_SIGNAL_HOST=192.168.x.x:8080" > mobile/.env
 ```
 
 Prototype controls:
@@ -155,16 +155,13 @@ Prototype controls:
 - Hold the weather `H/L` row for 3 seconds to trigger Tier 1.
 - Use configured codewords/settings flows in the sender app for tier setup.
 - When Tier 1+ is active, the app requests foreground location permission and
-  sends GPS updates through the bridge.
+  sends GPS updates over WebRTC.
 
 ### Receiver PWA
 
-Static HTML PWA with no build step.
-=======
-Polished React-based PWA in `receiver/`. The signaling server in `p2p-hello/`
-serves it at `/` so the same origin handles both the page and the WebRTC
-signaling WebSocket — no separate static host needed.
->>>>>>> Stashed changes
+React-based PWA in `receiver/`. The signaling server in `p2p-hello/` serves
+it at `/`, so the same origin handles both the page and the WebRTC signaling
+WebSocket — no separate static host needed.
 
 ```bash
 cd p2p-hello
@@ -172,56 +169,16 @@ npm install
 npm run signal     # serves receiver UI + /ws on port 8080
 ```
 
-<<<<<<< Updated upstream
-Open `http://localhost:3000` in a browser. The service worker enables offline
-capability.
-=======
 Then open `http://<host>:8080/#<token>` in a browser. If you omit the token
-the page prompts for it. See `p2p-hello/README.md` for the full streaming
-pipeline and codeword tiers.
->>>>>>> Stashed changes
-
-### P2P Socket Server
-
-Node.js server that bridges the mobile app's WebSocket events into an Autopass
-Hypercore-based P2P stream. Run sender and receiver in separate terminals.
-
-```bash
-cd p2p-hello
-npm install
-
-# Terminal 1: start the sender
-npm run sender
-# Output: Invite: <KEY>
-
-# Terminal 2: start the receiver with the invite key
-npm run receiver <KEY>
-```
-
-The mobile app connects to the WebSocket on port `8080`. The receiver PWA reads
-data streamed by the receiver process.
+the page prompts for it. The token is the part before `:` in the pairingId
+shown on the phone (long-press "Barcelona" → Settings).
 
 ### Running Everything Together
-
-The live demo uses the WebRTC pipeline (mobile → signaling → receiver PWA).
-The Autopass section above is the older Hypercore demo and is independent.
 
 ```bash
 # 1. Install dependencies
 cd mobile && npm install && cd ../p2p-hello && npm install
 
-<<<<<<< Updated upstream
-# 2. Start P2P sender
-cd p2p-hello && npm run sender
-
-# 3. Start P2P receiver with the invite key
-cd p2p-hello && npm run receiver <KEY>
-
-# 4. Serve the Receiver PWA
-cd receiver && python3 -m http.server 3000
-
-# 5. Start the mobile app
-=======
 # 2. Start the signaling server (Terminal 1)
 #    Also serves the receiver PWA at http://<host>:8080/
 cd p2p-hello && npm run signal
@@ -230,7 +187,6 @@ cd p2p-hello && npm run signal
 #    http://<host>:8080/   — paste the invite token from the mobile app
 
 # 4. Start the mobile app (Terminal 2)
->>>>>>> Stashed changes
 cd mobile && npm start
 ```
 
