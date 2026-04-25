@@ -1,11 +1,11 @@
-const RELAY_URL = 'ws://10.5.245.116:8080';
+import { SIGNAL_WS } from './config'
 
 let ws;
 
 export function connect() {
-  ws = new WebSocket(RELAY_URL);
+  ws = new WebSocket(SIGNAL_WS);
   ws.onopen = () => console.log('Bridge connected');
-  ws.onerror = (e) => console.error('Bridge error', e);
+  ws.onerror = (e) => console.error('Bridge error', e.message ?? e);
 }
 
 export function send(event) {
