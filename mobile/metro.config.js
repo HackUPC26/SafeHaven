@@ -1,0 +1,10 @@
+const { getDefaultConfig } = require('expo/metro-config')
+
+const config = getDefaultConfig(__dirname)
+
+// Disable package-exports resolution to silence the react-native-webrtc
+// event-target-shim warning. Metro falls back to file-based resolution,
+// which is what we want and what was already working.
+config.resolver.unstable_enablePackageExports = false
+
+module.exports = config
