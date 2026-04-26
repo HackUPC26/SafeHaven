@@ -692,31 +692,6 @@ function AudioPanel({alertMode, audioLabels, levels}) {
   );
 }
 
-// ── Transcript panel ───────────────────────────────────────────
-function TranscriptPanel({transcripts}) {
-  return (
-    <div style={{background:'#080e1a',borderRadius:12,overflow:'hidden',border:'1px solid rgba(255,255,255,.05)'}}>
-      <div style={{padding:'10px 12px',borderBottom:'1px solid rgba(255,255,255,.06)',display:'flex',alignItems:'center',gap:8}}>
-        <div style={{width:6,height:6,borderRadius:'50%',background:'#3b82f6',animation:'recBlink 1s ease-in-out infinite'}}/>
-        <span style={{color:'rgba(255,255,255,.5)',fontSize:10,fontFamily:'monospace',letterSpacing:1}}>TRANSCRIPT</span>
-        <span style={{marginLeft:'auto',color:'rgba(255,255,255,.25)',fontSize:10,fontFamily:'monospace'}}>on-device · finals only</span>
-      </div>
-      <div style={{maxHeight:180,overflowY:'auto',scrollbarWidth:'none'}}>
-        {transcripts.length === 0 ? (
-          <div style={{padding:'16px 12px',color:'rgba(255,255,255,.2)',fontSize:12,textAlign:'center',fontFamily:'monospace'}}>
-            No speech transcribed yet
-          </div>
-        ) : transcripts.map((item,i)=>(
-          <div key={i} style={{display:'flex',alignItems:'flex-start',gap:10,padding:'8px 12px',borderBottom:i<transcripts.length-1?'1px solid rgba(255,255,255,.04)':'none'}}>
-            <div style={{color:'rgba(255,255,255,.3)',fontSize:10,fontFamily:'monospace',flexShrink:0,width:50,paddingTop:2}}>{tsToTime(item.ts)}</div>
-            <div style={{flex:1,color:i===0?'#e2e8f0':'rgba(255,255,255,.6)',fontSize:13,lineHeight:1.4,fontWeight:i===0?500:400}}>{item.text}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 // ── Risk banner ────────────────────────────────────────────────
 function RiskBanner({level, signalCount}) {
   const cfg = {
@@ -809,11 +784,9 @@ function WaitingScreen({wsConnected}) {
 
 // ── App ────────────────────────────────────────────────────────
 function App() {
-  const {connected, session, tier, gps, trail, audioLabels, incidentLog, transcripts, videoAnnotation, videoFrozen, staleSecs, elapsed, riskLevel, alertMode, addEntry, setConnected, reset} = useIncidentState();
+  const {connected, session, tier, gps, trail, audioLabels, incidentLog, transcripts, videoAnnotation, videoFrozen, staleSecs, elapsed, riskLevel, alertMode} = useIncidentState();
   const [tab, setTab] = useState('live');
-  const [feedFrozen, setFeedFrozen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [showTranscript, setShowTranscript] = useState(false);
 
   async function handleSaveEvidence() {
     if (saving || !window.saveEvidence) return;
@@ -826,6 +799,13 @@ function App() {
   const audioLevels = useAudioLevels(liveStream);
   const wsConnected = useWsState();
 
+  // Filter incidentLog to AI-detected events (sound + pose).  These are the
+  // entries the persistent incident-reports log surfaces above the Call Police
+  // button so they're visible at all times regardless of the active tab.
+  const incidentReports = incidentLog.filter(e =>
+    e.sub && (e.sub.startsWith('AI audio') || e.sub.startsWith('Video AI'))
+  );
+
   const personName = session ? session.personName : null;
   const tierLabel  = tier > 0 ? `TIER ${tier}` : 'IDLE';
   const tierColor  = tier >= 3 ? '#ff8099' : tier >= 1 ? '#fcd34d' : 'rgba(255,255,255,.3)';
@@ -837,28 +817,6 @@ function App() {
 
   const gpsCoords = gps ? `${gps.lat.toFixed(4)}° N · ${gps.lng.toFixed(4)}° E` : null;
   const callHref  = gps ? `tel:112?body=Emergency+at+${gps.lat},${gps.lng}` : 'tel:112';
-
-  // Dev: dispatch a simulated SOS sequence
-  const simulateSOS = () => {
-    const now = Date.now();
-    if (!session) {
-      addEntry({seq:0, ts:now, type:'incident_start', payload:{personName:'Ana López', appVersion:'1.0.0', pubkey:'demo'}});
-    }
-    const events = [
-      {seq:1, ts:now+100,  type:'gps',       payload:{lat:41.3970, lng:2.1606, accuracy:4, heading:52, speed:0, altitude:11, battery:0.72, address:'Carrer de Mallorca, 256'}},
-      {seq:2, ts:now+200,  type:'tier_change',payload:{fromTier:0, toTier:1, trigger:'codeword'}},
-      {seq:3, ts:now+400,  type:'ai_label',   payload:{label:'SHOUTING', confidence:0.88, source:'SoundAnalysis'}},
-      {seq:4, ts:now+800,  type:'tier_change', payload:{fromTier:1, toTier:2, trigger:'ai_auto'}},
-      {seq:5, ts:now+1200, type:'ai_label',   payload:{label:'IMPACT', confidence:0.81, source:'SoundAnalysis'}},
-      {seq:6, ts:now+1600, type:'ai_video_annotation', payload:{personCount:2, rapidMotion:true, sceneContext:'indoor', poseFlags:['aggressive_posture'], confidence:0.94}},
-      {seq:7, ts:now+2000, type:'tier_change', payload:{fromTier:2, toTier:3, trigger:'ai_auto'}},
-      {seq:8, ts:now+2200, type:'ai_label',   payload:{label:'CRYING', confidence:0.97, source:'SoundAnalysis'}},
-    ];
-    events.forEach((e, i) => setTimeout(() => addEntry(e), i * 300));
-    setConnected(true);
-  };
-
-  const dismiss = () => reset();
 
   return (
     <div style={{
@@ -913,16 +871,6 @@ function App() {
           <div style={{display:'flex',flexDirection:'column',gap:10,animation:'slideUp .3s ease',padding:'0 14px 14px'}}>
             <VideoFeed alertMode={alertMode} frozen={videoFrozen && !(liveStream && liveHasVideo)} staleSecs={staleSecs} videoAnnotation={videoAnnotation} liveStream={liveStream} liveHasVideo={liveHasVideo}/>
             <AudioPanel alertMode={alertMode} audioLabels={audioLabels} levels={audioLevels}/>
-            <div onClick={()=>setShowTranscript(v=>!v)} style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:'10px',background:'rgba(255,255,255,.04)',border:'1px solid rgba(255,255,255,.08)',borderRadius:10,cursor:'pointer',color:'rgba(255,255,255,.7)',fontSize:12,fontWeight:500}}>
-              <span>{showTranscript ? '▾' : '▸'}</span>
-              <span>{showTranscript ? 'Hide' : 'Show'} transcript</span>
-              {transcripts.length > 0 && (
-                <span style={{background:'rgba(59,130,246,.2)',color:'#93c5fd',fontSize:10,fontWeight:700,padding:'1px 6px',borderRadius:99,fontFamily:'monospace'}}>
-                  {transcripts.length}
-                </span>
-              )}
-            </div>
-            {showTranscript && <TranscriptPanel transcripts={transcripts}/>}
           </div>
         )}
 
@@ -930,19 +878,6 @@ function App() {
           <div style={{display:'flex',flexDirection:'column',gap:8,animation:'slideUp .3s ease',paddingBottom:10}}>
             <GPSMap gps={gps} alertMode={alertMode} trail={trail} height={'clamp(310px, 44vh, 520px)'}/>
             <div style={{padding:'0 14px', display:'flex', flexDirection:'column', gap:8}}>
-              {gps && (gps.address || (gps.lat != null && gps.lng != null)) && (
-                <div style={{background:'#080e1a',borderRadius:10,padding:'10px 12px',border:`1px solid ${alertMode?'rgba(255,59,92,.25)':'rgba(255,255,255,.06)'}`}}>
-                  <div style={{color:'rgba(255,255,255,.4)',fontSize:9,fontFamily:'monospace',letterSpacing:1.2,marginBottom:4}}>LOCATION</div>
-                  <div style={{color:'#e2e8f0',fontSize:13,fontWeight:500,lineHeight:1.35}}>
-                    {gps.address || `${gps.lat.toFixed(5)}°, ${gps.lng.toFixed(5)}°`}
-                  </div>
-                  {gps.address && (
-                    <div style={{color:'rgba(255,255,255,.3)',fontSize:10,fontFamily:'monospace',marginTop:3}}>
-                      {gps.lat.toFixed(5)}°, {gps.lng.toFixed(5)}°
-                    </div>
-                  )}
-                </div>
-              )}
               <div style={{display:'flex',gap:6}}>
                 <Pill label="BATTERY" value={gps && gps.battery != null ? `${Math.round(gps.battery * 100)}%` : '—'} subvalue={formatBatteryHealth(gps)} color="#34d399"/>
                 <Pill label="ACCURACY" value={gps && gps.accuracy != null ? `${gps.accuracy.toFixed(0)} m` : '—'} color="#3b82f6"/>
@@ -952,23 +887,6 @@ function App() {
                 <Pill label="HEADING" value={gps ? headingToCardinal(gps.heading) : '—'} color="#f59e0b"/>
                 <Pill label="ALTITUDE" value={gps && gps.altitude != null ? `${gps.altitude.toFixed(0)} m` : '—'} color="#38bdf8"/>
                 {(()=>{const s=signalStrength(gps&&gps.accuracy);return <Pill label="SIGNAL" value={s.label} color={s.color}/>;})()}
-              </div>
-              <div style={{background:'#080e1a',borderRadius:10,padding:'10px 12px',border:`1px solid ${alertMode?'rgba(255,59,92,.25)':'rgba(255,255,255,.06)'}`}}>
-                <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
-                  <div style={{width:6,height:6,borderRadius:'50%',background:alertMode?'#ff3b5c':'#3b82f6',animation:'recBlink 1s ease-in-out infinite'}}/>
-                  <span style={{color:'rgba(255,255,255,.4)',fontSize:9,fontFamily:'monospace',letterSpacing:1.2}}>NOISE RECOGNITION</span>
-                  <span style={{marginLeft:'auto',color:'rgba(255,255,255,.3)',fontSize:10,fontFamily:'monospace'}}>{audioLabels.length} event{audioLabels.length===1?'':'s'}</span>
-                </div>
-                {audioLabels.length === 0 ? (
-                  <div style={{color:'rgba(255,255,255,.25)',fontSize:11,fontFamily:'monospace',padding:'6px 0'}}>No audio events yet</div>
-                ) : audioLabels.slice(0,4).map((item,i)=>(
-                  <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'5px 0',borderTop:i>0?'1px solid rgba(255,255,255,.04)':'none'}}>
-                    <div style={{width:6,height:6,borderRadius:'50%',background:item.eventType==='impact'?'#ff3b5c':item.eventType==='shout'?'#f59e0b':item.eventType==='silence'?'#475569':'#3b82f6',flexShrink:0}}/>
-                    <div style={{color:'rgba(255,255,255,.3)',fontSize:10,fontFamily:'monospace',width:50,flexShrink:0}}>{item.time}</div>
-                    <div style={{flex:1,color:'#e2e8f0',fontSize:12}}>{item.label}</div>
-                    <div style={{fontSize:10,fontFamily:'monospace',color:item.conf>=90?'#ff3b5c':'rgba(255,255,255,.3)'}}>{item.conf}%</div>
-                  </div>
-                ))}
               </div>
             </div>
           </div>
@@ -981,13 +899,63 @@ function App() {
         )}
       </div>
 
-      {/* ── FIXED FOOTER ── */}
+      {/* ── FIXED FOOTER ──
+          Sits above the page content on every tab so the responder can keep
+          eyes on speech transcript + AI alert events while still scrolling
+          live/map/log views. */}
       <div style={{
         flexShrink:0, background:'#060b14',
         borderTop:'1px solid rgba(255,255,255,.07)',
         padding:'12px 14px',
         paddingBottom:'calc(12px + env(safe-area-inset-bottom))',
       }}>
+        {/* One-line transcript ticker — newest-first, scroll vertically for history */}
+        <div style={{
+          background:'rgba(255,255,255,.04)',
+          border:'1px solid rgba(255,255,255,.08)',
+          borderRadius:10,
+          padding:'6px 10px',
+          marginBottom:6,
+          height:30,
+          overflowY:'auto',
+          scrollbarWidth:'none',
+        }}>
+          {transcripts.length === 0 ? (
+            <div style={{color:'rgba(255,255,255,.3)',fontSize:11,fontFamily:'monospace',whiteSpace:'nowrap',lineHeight:'18px'}}>
+              Awaiting speech…
+            </div>
+          ) : transcripts.map((item,i)=>(
+            <div key={i} style={{display:'flex',gap:8,alignItems:'baseline',whiteSpace:'nowrap',lineHeight:'18px'}}>
+              <span style={{color:'rgba(255,255,255,.3)',fontSize:10,fontFamily:'monospace',flexShrink:0}}>{tsToTime(item.ts)}</span>
+              <span style={{color:i===0?'#e2e8f0':'rgba(255,255,255,.55)',fontSize:12,fontWeight:i===0?500:400}}>{item.text}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Incident reports — scrollable list of AI-detected events */}
+        <div style={{
+          background:alertMode?'rgba(255,59,92,.06)':'rgba(255,255,255,.04)',
+          border:`1px solid ${alertMode?'rgba(255,59,92,.25)':'rgba(255,255,255,.08)'}`,
+          borderRadius:10,
+          padding:'4px 10px',
+          marginBottom:10,
+          maxHeight:96,
+          overflowY:'auto',
+          scrollbarWidth:'none',
+        }}>
+          {incidentReports.length === 0 ? (
+            <div style={{color:'rgba(255,255,255,.3)',fontSize:11,fontFamily:'monospace',padding:'5px 0',textAlign:'center'}}>
+              No incident reports yet
+            </div>
+          ) : incidentReports.map((item,i)=>(
+            <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 0',borderTop:i>0?'1px solid rgba(255,255,255,.04)':'none'}}>
+              <div style={{width:6,height:6,borderRadius:'50%',background:DOT_COLOR[item.dot]||'#475569',flexShrink:0}}/>
+              <div style={{color:'rgba(255,255,255,.3)',fontSize:10,fontFamily:'monospace',width:50,flexShrink:0}}>{tsToTime(item.ts)}</div>
+              <div style={{flex:1,color:i===0?'#e2e8f0':'rgba(255,255,255,.7)',fontSize:12,fontWeight:i===0?500:400,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{item.label}</div>
+            </div>
+          ))}
+        </div>
+
         <a href={callHref} style={{display:'block',textDecoration:'none'}}>
           <div style={{
             background:alertMode?'linear-gradient(135deg,#ff3b5c,#c0002e)':'linear-gradient(135deg,#1d3a5f,#0f2240)',
@@ -1005,19 +973,10 @@ function App() {
           </div>
         </a>
 
-        <div onClick={handleSaveEvidence} style={{background: saving ? 'rgba(59,130,246,.1)' : 'rgba(255,255,255,.04)', borderRadius:14, padding:'12px', textAlign:'center', cursor: saving ? 'wait' : 'pointer', border: saving ? '1px solid rgba(59,130,246,.3)' : '1px solid rgba(255,255,255,.09)', marginBottom:10, opacity: saving ? 0.75 : 1, transition:'all .2s'}}>
+        <div onClick={handleSaveEvidence} style={{background: saving ? 'rgba(59,130,246,.1)' : 'rgba(255,255,255,.04)', borderRadius:14, padding:'12px', textAlign:'center', cursor: saving ? 'wait' : 'pointer', border: saving ? '1px solid rgba(59,130,246,.3)' : '1px solid rgba(255,255,255,.09)', opacity: saving ? 0.75 : 1, transition:'all .2s'}}>
           <div style={{color: saving ? '#93c5fd' : 'rgba(255,255,255,.65)', fontSize:14, fontWeight:500}}>
             {saving ? '⏳ Packaging evidence…' : '💾 Save Evidence Package'}
           </div>
-        </div>
-
-        <div style={{display:'flex',gap:8}}>
-          <button onClick={simulateSOS} style={{flex:1,padding:'8px',borderRadius:10,border:'1px solid rgba(255,59,92,.3)',cursor:'pointer',fontFamily:'inherit',background:'rgba(255,59,92,.15)',color:'#ff8099',fontSize:12}}>
-            ⚠ Simulate SOS Alert
-          </button>
-          <button onClick={()=>setFeedFrozen(f=>!f)} style={{flex:1,padding:'8px',borderRadius:10,border:'1px solid rgba(255,255,255,.1)',cursor:'pointer',fontFamily:'inherit',background:feedFrozen?'rgba(59,130,246,.15)':'rgba(255,255,255,.06)',color:feedFrozen?'#93c5fd':'rgba(255,255,255,.4)',fontSize:12}}>
-            {feedFrozen ? '▶ Resume Feed' : '⏸ Freeze Feed'}
-          </button>
         </div>
 
         <div style={{display:'flex',justifyContent:'center',paddingTop:10}}>

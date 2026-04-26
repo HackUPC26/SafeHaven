@@ -17,6 +17,8 @@ public final class SafeHavenAIModule: Module {
   private var isRunning = false
   private var silenceStartedAt: Date?
   private var lastEmittedAtByLabel: [String: Date] = [:]
+  private var notificationsRegistered = false
+  private var lastRestartAt: Date?
 
   public func definition() -> ModuleDefinition {
     Name("SafeHavenAI")
@@ -94,10 +96,29 @@ public final class SafeHavenAIModule: Module {
       return
     }
 
+    // Match the speech recognizer's session config exactly so both can share
+    // the mic without one overriding the other. The recognizer (CodewordListener)
+    // and react-native-webrtc both want .voiceChat — using the same mode here
+    // means setCategory is idempotent regardless of activation order. We give
+    // up some classifier fidelity vs .measurement, but Apple's SoundAnalysis
+    // still detects our tier-trigger labels at 16 kHz mono just fine.
     let session = AVAudioSession.sharedInstance()
-    try session.setCategory(.playAndRecord, mode: .measurement, options: [.mixWithOthers, .allowBluetoothHFP])
+    try session.setCategory(
+      .playAndRecord,
+      mode: .voiceChat,
+      options: [.mixWithOthers, .allowBluetoothHFP, .defaultToSpeaker]
+    )
     try session.setActive(true)
 
+    self.silenceStartedAt = nil
+    self.lastEmittedAtByLabel = [:]
+
+    try buildEngine()
+    registerSessionNotifications()
+    self.isRunning = true
+  }
+
+  private func buildEngine() throws {
     let engine = AVAudioEngine()
     let inputNode = engine.inputNode
     let inputFormat = inputNode.outputFormat(forBus: 0)
@@ -117,8 +138,6 @@ public final class SafeHavenAIModule: Module {
     self.analyzer = analyzer
     self.classifyRequest = request
     self.observer = observer
-    self.silenceStartedAt = nil
-    self.lastEmittedAtByLabel = [:]
 
     inputNode.installTap(onBus: 0, bufferSize: 8192, format: inputFormat) { [weak self] buffer, time in
       guard let self else {
@@ -131,8 +150,16 @@ public final class SafeHavenAIModule: Module {
 
     engine.prepare()
     try engine.start()
+  }
 
-    self.isRunning = true
+  private func teardownEngine() {
+    audioEngine?.inputNode.removeTap(onBus: 0)
+    audioEngine?.stop()
+    analyzer?.removeAllRequests()
+    analyzer = nil
+    classifyRequest = nil
+    observer = nil
+    audioEngine = nil
   }
 
   @discardableResult
@@ -145,16 +172,85 @@ public final class SafeHavenAIModule: Module {
   }
 
   private func stopSoundClassificationOnQueue() {
-    audioEngine?.inputNode.removeTap(onBus: 0)
-    audioEngine?.stop()
-    analyzer?.removeAllRequests()
-    analyzer = nil
-    classifyRequest = nil
-    observer = nil
-    audioEngine = nil
+    if notificationsRegistered {
+      NotificationCenter.default.removeObserver(self)
+      notificationsRegistered = false
+    }
+    teardownEngine()
     silenceStartedAt = nil
     lastEmittedAtByLabel = [:]
+    lastRestartAt = nil
     isRunning = false
+  }
+
+  private func registerSessionNotifications() {
+    guard !notificationsRegistered else { return }
+    notificationsRegistered = true
+
+    let nc = NotificationCenter.default
+    // Fires when iOS reconfigures the engine's underlying graph — most
+    // commonly when another subsystem (here: WebRTC's RTCAudioSession)
+    // switches the shared session's mode/category. The engine's input tap
+    // goes silent without raising an error on the SNRequest, so we have
+    // to detect the reconfiguration ourselves and rebuild.
+    nc.addObserver(self,
+                   selector: #selector(handleAudioReconfiguration(_:)),
+                   name: .AVAudioEngineConfigurationChange,
+                   object: nil)
+    nc.addObserver(self,
+                   selector: #selector(handleAudioReconfiguration(_:)),
+                   name: AVAudioSession.routeChangeNotification,
+                   object: nil)
+    nc.addObserver(self,
+                   selector: #selector(handleMediaServicesReset(_:)),
+                   name: AVAudioSession.mediaServicesWereResetNotification,
+                   object: nil)
+  }
+
+  @objc private func handleAudioReconfiguration(_ note: Notification) {
+    analysisQueue.async { [weak self] in
+      self?.rebuildEngineOnQueue(reason: note.name.rawValue)
+    }
+  }
+
+  @objc private func handleMediaServicesReset(_ note: Notification) {
+    analysisQueue.async { [weak self] in
+      guard let self, self.isRunning else { return }
+      // Full audio stack reset — session has to be reactivated from scratch.
+      self.teardownEngine()
+      do {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(
+          .playAndRecord,
+          mode: .voiceChat,
+          options: [.mixWithOthers, .allowBluetoothHFP, .defaultToSpeaker]
+        )
+        try session.setActive(true)
+        try self.buildEngine()
+        print("[SafeHavenAI] engine rebuilt after media services reset")
+      } catch {
+        print("[SafeHavenAI] media services reset recovery failed: \(error.localizedDescription)")
+      }
+    }
+  }
+
+  private func rebuildEngineOnQueue(reason: String) {
+    guard isRunning else { return }
+
+    // Coalesce — config change + route change often fire back-to-back.
+    let now = Date()
+    if let last = lastRestartAt, now.timeIntervalSince(last) < 0.4 {
+      return
+    }
+    lastRestartAt = now
+
+    teardownEngine()
+    do {
+      try buildEngine()
+      print("[SafeHavenAI] engine rebuilt (\(reason))")
+    } catch {
+      print("[SafeHavenAI] engine rebuild failed (\(reason)): \(error.localizedDescription)")
+    }
   }
 
   fileprivate func handleClassifications(_ classifications: [SNClassification]) {
