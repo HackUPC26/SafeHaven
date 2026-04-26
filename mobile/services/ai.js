@@ -77,12 +77,10 @@ function ensureDebugSubscription() {
 function normalizeVideoAnnotation(payload) {
   if (!payload) return null;
 
-  const personCount = Number(payload.personCount);
   const confidence = normalizeConfidence(payload.confidence);
   const poseFlags = Array.isArray(payload.poseFlags) ? payload.poseFlags : [];
 
   return {
-    personCount: Number.isFinite(personCount) ? Math.max(0, Math.round(personCount)) : 0,
     rapidMotion: !!payload.rapidMotion,
     sceneContext: payload.sceneContext || 'camera',
     poseFlags,
@@ -97,7 +95,6 @@ function forwardVideoAnnotation(payload) {
 
   console.log(
     '[ai] video annotation:',
-    `${annotation.personCount} person(s)`,
     annotation.rapidMotion ? 'rapid motion' : 'calm',
     annotation.confidence.toFixed(2)
   );
@@ -108,6 +105,15 @@ function forwardVideoAnnotation(payload) {
   });
 
   return true;
+}
+
+function sendVideoAnnotationStatus(status, reason) {
+  send({
+    event_type: 'ai_video_status',
+    status,
+    reason: reason || null,
+    source: 'Vision',
+  });
 }
 
 function ensureVideoAnnotationSubscription() {
@@ -165,22 +171,28 @@ export async function startVideoAnnotation() {
   if (videoAnnotationStarted) return true;
 
   ensureVideoAnnotationSubscription();
+  sendVideoAnnotationStatus('starting');
 
   try {
     const available = await SafeHavenAI.isVideoAnnotationAvailable();
     if (!available) {
       console.warn('[ai] native video annotation unavailable');
+      sendVideoAnnotationStatus('unavailable', 'Native Vision video annotation is unavailable on this device/build');
       return false;
     }
 
     videoAnnotationStarted = await SafeHavenAI.startVideoAnnotation();
     if (!videoAnnotationStarted) {
       console.warn('[ai] native video annotation did not start');
+      sendVideoAnnotationStatus('failed', 'Native Vision capture did not start. WebRTC may already own the camera.');
+    } else {
+      sendVideoAnnotationStatus('running');
     }
     return videoAnnotationStarted;
   } catch (err) {
     videoAnnotationStarted = false;
     console.warn('[ai] failed to start video annotation:', err?.message ?? err);
+    sendVideoAnnotationStatus('failed', err?.message ?? String(err));
     return false;
   }
 }
@@ -196,6 +208,7 @@ export async function stopVideoAnnotation() {
     videoAnnotationStarted = false;
     videoAnnotationSubscription?.remove?.();
     videoAnnotationSubscription = null;
+    sendVideoAnnotationStatus('stopped');
   }
 
   return true;

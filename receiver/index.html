@@ -140,6 +140,7 @@ function useIncidentState() {
   const [audioLabels, setAudioLabels]       = useState([]);       // [{time,eventType,label,conf}]
   const [incidentLog, setIncidentLog]       = useState([]);       // [{ts,label,sub,dot}]
   const [videoAnnotation, setVideoAnnotation] = useState(null);
+  const [videoAiStatus, setVideoAiStatus]   = useState(null);
   const [videoFrozen, setVideoFrozen]       = useState(true);
   const [staleSecs, setStaleSecs]           = useState(0);
   const [elapsed, setElapsed]               = useState(0);
@@ -188,7 +189,14 @@ function useIncidentState() {
         setVideoFrozen(false);
         lastVideoRef.current = ts;
         if (payload.poseFlags && payload.poseFlags.length > 0) {
-          pushLog({ts, label: payload.poseFlags.map(f => f.replace(/_/g,' ')).join(', '), sub:`Video AI — ${payload.personCount} person(s)`, dot:'amber'});
+          pushLog({ts, label: payload.poseFlags.map(f => f.replace(/_/g,' ')).join(', '), sub:`Video AI${payload.source ? ` (${payload.source})` : ''}`, dot:'amber'});
+        }
+        break;
+
+      case 'ai_video_status':
+        setVideoAiStatus(payload);
+        if (payload.status === 'failed' || payload.status === 'unavailable') {
+          pushLog({ts, label:'Video AI fallback active', sub: payload.reason || payload.status, dot:'amber'});
         }
         break;
 
@@ -215,6 +223,7 @@ function useIncidentState() {
     setAudioLabels([]);
     setIncidentLog([]);
     setVideoAnnotation(null);
+    setVideoAiStatus(null);
     setVideoFrozen(true);
     setStaleSecs(0);
     setElapsed(0);
@@ -250,7 +259,7 @@ function useIncidentState() {
   const riskLevel = tier >= 3 ? 'HIGH' : tier >= 1 ? 'MED' : 'LOW';
   const alertMode = tier >= 3;
 
-  return {connected, session, tier, gps, trail, audioLabels, incidentLog, videoAnnotation, videoFrozen, staleSecs, elapsed, riskLevel, alertMode, addEntry, setConnected, reset};
+  return {connected, session, tier, gps, trail, audioLabels, incidentLog, videoAnnotation, videoAiStatus, videoFrozen, staleSecs, elapsed, riskLevel, alertMode, addEntry, setConnected, reset};
 }
 
 // ── Live MediaStream channel — set by the WebRTC signaling layer below
@@ -459,15 +468,27 @@ function GPSMap({gps, alertMode, trail, height='clamp(320px, 48vh, 560px)'}) {
 }
 
 // ── Video feed ─────────────────────────────────────────────────
-function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, liveStream, feedFrozen}) {
+function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, videoAiStatus, liveStream, feedFrozen, annotationsEnabled}) {
   const ac = alertMode ? '#ff3b5c' : '#22d3ee';
-  const personCount = videoAnnotation ? videoAnnotation.personCount : null;
   const poseLabel   = videoAnnotation && videoAnnotation.poseFlags && videoAnnotation.poseFlags.length > 0
     ? videoAnnotation.poseFlags[0].replace(/_/g,' ').toUpperCase()
     : 'Standing';
+  const sourceLabel = videoAnnotation?.source === 'Vision'
+    ? 'VISION'
+    : videoAnnotation?.source === 'ReceiverFrameDiff'
+      ? 'FRAME DIFF'
+      : (videoAnnotation?.source || videoAiStatus?.source || 'VIDEO AI').toString().toUpperCase();
   const showFreezeBadge = frozen && (feedFrozen || staleSecs > 0);
   const videoRef = useRef(null);
+  const analysisVideoRef = useRef(null);
+  const lastVisionAnnotationAtRef = useRef(0);
   const [needsTap, setNeedsTap] = useState(false);
+
+  useEffect(() => {
+    if (videoAnnotation?.source === 'Vision') {
+      lastVisionAnnotationAtRef.current = Date.now();
+    }
+  }, [videoAnnotation]);
 
   // When a real WebRTC MediaStream arrives, attach it to the <video> element
   // and explicitly call play(). Browsers (esp. Safari) block autoplay-with-
@@ -475,9 +496,15 @@ function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, liveStream, f
   // to-unmute overlay so the user can grant the gesture.
   useEffect(() => {
     const el = videoRef.current;
+    const analysisEl = analysisVideoRef.current;
     if (!el) return;
     if (liveStream) {
       if (el.srcObject !== liveStream) el.srcObject = liveStream;
+      if (analysisEl && analysisEl.srcObject !== liveStream) {
+        analysisEl.srcObject = liveStream;
+        analysisEl.muted = true;
+        analysisEl.play().catch(err => console.warn('[video-ai] analysis video play failed:', err));
+      }
       if (frozen) {
         el.pause();
         setNeedsTap(false);
@@ -490,9 +517,72 @@ function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, liveStream, f
       }
     } else if (el.srcObject) {
       el.srcObject = null;
+      if (analysisEl) analysisEl.srcObject = null;
       setNeedsTap(false);
     }
   }, [liveStream, frozen]);
+
+  useEffect(() => {
+    const el = analysisVideoRef.current || videoRef.current;
+    if (!el || !liveStream || !annotationsEnabled) return;
+
+    const canvas = document.createElement('canvas');
+    const width = 48;
+    const height = 36;
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    let previous = null;
+
+    const id = setInterval(() => {
+      if (!ctx || el.readyState < 2 || el.videoWidth === 0 || el.videoHeight === 0) return;
+      if (Date.now() - lastVisionAnnotationAtRef.current < 2500) return;
+
+      try {
+        ctx.drawImage(el, 0, 0, width, height);
+        const data = ctx.getImageData(0, 0, width, height).data;
+        let deltaTotal = 0;
+        let changedPixels = 0;
+
+        if (previous) {
+          for (let i = 0; i < data.length; i += 4) {
+            const current = (data[i] + data[i + 1] + data[i + 2]) / 3;
+            const diff = Math.abs(current - previous[i / 4]);
+            deltaTotal += diff;
+            if (diff > 22) changedPixels += 1;
+            previous[i / 4] = current;
+          }
+        } else {
+          previous = new Float32Array(width * height);
+          for (let i = 0; i < data.length; i += 4) {
+            previous[i / 4] = (data[i] + data[i + 1] + data[i + 2]) / 3;
+          }
+          return;
+        }
+
+        const pixelCount = width * height;
+        const changedRatio = changedPixels / pixelCount;
+        const meanDelta = deltaTotal / pixelCount;
+        const rapidMotion = changedRatio > 0.12 || meanDelta > 10;
+        const confidence = Math.max(0.55, Math.min(0.93, 0.58 + changedRatio * 1.8 + meanDelta / 80));
+        const annotation = {
+          rapidMotion,
+          sceneContext: 'live video',
+          poseFlags: rapidMotion ? ['rapid_motion'] : [],
+          confidence,
+          source: 'ReceiverFrameDiff',
+        };
+
+        window.dispatchEvent(new CustomEvent('safehaven:entry', {
+          detail: { ts: Date.now(), type: 'ai_video_annotation', payload: annotation },
+        }));
+      } catch (err) {
+        console.warn('[video-ai] receiver frame analysis failed:', err);
+      }
+    }, 900);
+
+    return () => clearInterval(id);
+  }, [liveStream, annotationsEnabled]);
 
   function tapToPlay() {
     const el = videoRef.current;
@@ -501,14 +591,13 @@ function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, liveStream, f
     el.play().then(() => setNeedsTap(false)).catch(err => console.warn('[video] play failed:', err));
   }
 
-  // Live-stream branch: real video covers the area; we keep only the LIVE
-  // pill, person-count chip, optional annotation overlay and corner brackets
-  // — the silhouette mock and P1/P2 boxes are dropped because they'd be
-  // misleading on top of an actual feed.
+  // Live-stream branch: the visible video can be frozen while the hidden muted
+  // analysis video keeps consuming frames for annotation overlays.
   if (liveStream) {
     return (
       <div style={{position:'relative',height:280,background:'#000',overflow:'hidden',borderRadius:12,flexShrink:0}} onClick={needsTap ? tapToPlay : undefined}>
         <video ref={videoRef} autoPlay playsInline style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+        <video ref={analysisVideoRef} autoPlay muted playsInline aria-hidden="true" style={{position:'absolute',width:1,height:1,opacity:0,pointerEvents:'none'}}/>
         {showFreezeBadge && (
           <div style={{position:'absolute',inset:0,zIndex:2,background:'rgba(5,10,18,.56)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6,pointerEvents:'none'}}>
             <div style={{color:'#f59e0b',fontSize:12,fontWeight:700,letterSpacing:1,fontFamily:'monospace'}}>FEED FROZEN</div>
@@ -525,14 +614,9 @@ function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, liveStream, f
           <div style={{width:7,height:7,borderRadius:'50%',background:showFreezeBadge?'#f59e0b':'#ff3b5c',animation:showFreezeBadge?'none':'recBlink 1s ease-in-out infinite'}}/>
           <span style={{color:'#fff',fontSize:10,fontWeight:700,fontFamily:'monospace',letterSpacing:1}}>{showFreezeBadge ? 'FROZEN' : 'LIVE'}</span>
         </div>
-        {personCount != null && (
-          <div style={{position:'absolute',top:10,right:10,zIndex:4,background:'rgba(5,10,20,.6)',borderRadius:6,padding:'4px 8px',color:ac,fontSize:10,fontWeight:700,fontFamily:'monospace'}}>
-            {`${personCount} PERSON${personCount !== 1 ? 'S' : ''}`}
-          </div>
-        )}
         {videoAnnotation && (
           <div style={{position:'absolute',bottom:8,left:8,zIndex:4,background:'rgba(5,10,20,.7)',borderRadius:6,padding:'4px 8px',display:'flex',gap:8}}>
-            {[videoAnnotation.sceneContext || 'Indoor', videoAnnotation.rapidMotion ? 'Rapid motion' : 'Calm'].map(l=>(
+            {[sourceLabel, videoAnnotation.sceneContext || 'Indoor', videoAnnotation.rapidMotion ? 'Rapid motion' : 'Calm'].map(l=>(
               <span key={l} style={{color:'rgba(255,255,255,.7)',fontSize:9,fontFamily:'monospace'}}>{l}</span>
             ))}
           </div>
@@ -556,36 +640,19 @@ function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, liveStream, f
           <div style={{position:'absolute',top:-22,left:'50%',transform:'translateX(-50%)',width:20,height:22,background:'#111820',borderRadius:'50%'}}/>
         </div>
       </div>
-      {personCount !== 1 && personCount !== 0 && (
-        <div style={{position:'absolute',left:'60%',bottom:24}}>
-          <div style={{width:28,height:58,background:'#101620',borderRadius:'30% 30% 10% 10%',position:'relative'}}>
-            <div style={{position:'absolute',top:-18,left:'50%',transform:'translateX(-50%)',width:17,height:18,background:'#101620',borderRadius:'50%'}}/>
-          </div>
-        </div>
-      )}
       {/* P1 annotation */}
       {videoAnnotation && <div style={{position:'absolute',zIndex:4,left:'calc(22% - 8px)',bottom:22,width:52,height:118,border:`1.5px solid ${ac}`,boxShadow:`0 0 8px ${alertMode?'rgba(255,59,92,.3)':'rgba(34,211,238,.2)'}`,borderRadius:4,pointerEvents:'none'}}>
         <div style={{position:'absolute',top:-20,left:0,background:ac,color:'#000',fontSize:9,fontWeight:700,fontFamily:'monospace',padding:'2px 5px',borderRadius:'3px 3px 3px 0',whiteSpace:'nowrap'}}>
           P1 · {videoAnnotation ? poseLabel : '—'} {videoAnnotation ? `· ${Math.round((videoAnnotation.confidence||0.87)*100)}%` : ''}
         </div>
       </div>}
-      {videoAnnotation && personCount !== 1 && (
-        <div style={{position:'absolute',zIndex:4,left:'calc(60% - 6px)',bottom:22,width:42,height:82,border:'1.5px solid #f59e0b',boxShadow:'0 0 8px rgba(245,158,11,.2)',borderRadius:4,pointerEvents:'none'}}>
-          <div style={{position:'absolute',top:-20,left:0,background:'#f59e0b',color:'#000',fontSize:9,fontWeight:700,fontFamily:'monospace',padding:'2px 5px',borderRadius:'3px 3px 3px 0',whiteSpace:'nowrap'}}>
-            P2 · Seated · 82%
-          </div>
-        </div>
-      )}
       {videoAnnotation && (
         <div style={{position:'absolute',zIndex:4,bottom:8,left:8,background:'rgba(5,10,20,.85)',borderRadius:6,padding:'4px 8px',display:'flex',gap:8}}>
-          {[videoAnnotation.sceneContext || 'Indoor', videoAnnotation.rapidMotion ? 'Rapid motion' : 'Calm'].map(l=>(
+          {[sourceLabel, videoAnnotation.sceneContext || 'Indoor', videoAnnotation.rapidMotion ? 'Rapid motion' : 'Calm'].map(l=>(
             <span key={l} style={{color:'rgba(255,255,255,.55)',fontSize:9,fontFamily:'monospace'}}>{l}</span>
           ))}
         </div>
       )}
-      {videoAnnotation && <div style={{position:'absolute',zIndex:4,top:10,right:10,background:'rgba(5,10,20,.85)',borderRadius:6,padding:'4px 8px',color:ac,fontSize:10,fontWeight:700,fontFamily:'monospace'}}>
-        {personCount != null ? `${personCount} PERSON${personCount !== 1 ? 'S' : ''}` : '— PERSONS'}
-      </div>}
       {!frozen ? (
         <div style={{position:'absolute',zIndex:4,top:10,left:10,display:'flex',alignItems:'center',gap:5}}>
           <div style={{width:7,height:7,borderRadius:'50%',background:'#ff3b5c',animation:'recBlink 1s ease-in-out infinite'}}/>
@@ -743,7 +810,7 @@ function WaitingScreen() {
 
 // ── App ────────────────────────────────────────────────────────
 function App() {
-  const {connected, session, tier, gps, trail, audioLabels, incidentLog, videoAnnotation, videoFrozen, staleSecs, elapsed, riskLevel, alertMode, addEntry, setConnected, reset} = useIncidentState();
+  const {connected, session, tier, gps, trail, audioLabels, incidentLog, videoAnnotation, videoAiStatus, videoFrozen, staleSecs, elapsed, riskLevel, alertMode, addEntry, setConnected, reset} = useIncidentState();
   const [tab, setTab] = useState('live');
   const [annotationsEnabled, setAnnotationsEnabled] = useState(true);
   const [feedFrozen, setFeedFrozen] = useState(false);
@@ -864,7 +931,7 @@ function App() {
                 {feedFrozen ? 'RESUME FEED' : 'FREEZE FEED'}
               </button>
             </div>
-            <VideoFeed alertMode={alertMode} frozen={effectiveVideoFrozen} staleSecs={effectiveStaleSecs} videoAnnotation={visibleVideoAnnotation} liveStream={liveStream} feedFrozen={feedFrozen}/>
+            <VideoFeed alertMode={alertMode} frozen={effectiveVideoFrozen} staleSecs={effectiveStaleSecs} videoAnnotation={visibleVideoAnnotation} videoAiStatus={videoAiStatus} liveStream={liveStream} feedFrozen={feedFrozen} annotationsEnabled={annotationsEnabled}/>
             <AudioPanel alertMode={alertMode} audioLabels={audioLabels} levels={audioLevels}/>
           </div>
         )}
@@ -1049,6 +1116,17 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
     } else if (t === 'ai_video_annotation') {
       ensureSession(ts);
       dispatchEntry({ ts, type: 'ai_video_annotation', payload: payload.annotation || payload });
+    } else if (t === 'ai_video_status') {
+      ensureSession(ts);
+      dispatchEntry({
+        ts,
+        type: 'ai_video_status',
+        payload: {
+          status: payload.status || 'unknown',
+          reason: payload.reason || null,
+          source: payload.source || 'sender',
+        },
+      });
     } else if (t === 'incident_closed' || t === 'incident_ended') {
       dispatchEntry({
         ts, type: 'incident_end',
