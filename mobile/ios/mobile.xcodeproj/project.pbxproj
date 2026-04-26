@@ -47,8 +47,8 @@
 		13B07FAE1A68108700A75B9A /* mobile */ = {
 			isa = PBXGroup;
 			children = (
-				F11748412D0307B40044C1D9 /* AppDelegate.swift */,
 				F11748442D0722820044C1D9 /* mobile-Bridging-Header.h */,
+				F11748412D0307B40044C1D9 /* AppDelegate.swift */,
 				BB2F792B24A3F905000567C9 /* Supporting */,
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
@@ -376,7 +376,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = mobile/mobile.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = FTX7BZ977Z;
+				DEVELOPMENT_TEAM = JMMJ5P4778;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(inherited)",
@@ -395,7 +395,7 @@
 					"-lc++",
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
-				PRODUCT_BUNDLE_IDENTIFIER = com.spencer.safehaven;
+				PRODUCT_BUNDLE_IDENTIFIER = com.flochs.mobile;
 				PRODUCT_NAME = mobile;
 				SWIFT_OBJC_BRIDGING_HEADER = "mobile/mobile-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -413,7 +413,7 @@
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = mobile/mobile.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = FTX7BZ977Z;
+				DEVELOPMENT_TEAM = JMMJ5P4778;
 				INFOPLIST_FILE = mobile/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -427,7 +427,7 @@
 					"-lc++",
 				);
 				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
-				PRODUCT_BUNDLE_IDENTIFIER = com.spencer.safehaven;
+				PRODUCT_BUNDLE_IDENTIFIER = com.flochs.mobile;
 				PRODUCT_NAME = mobile;
 				SWIFT_OBJC_BRIDGING_HEADER = "mobile/mobile-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;

@@ -305,7 +305,7 @@ npx expo run:ios               # simulator
 
 The first build takes 5–10 minutes (Pods download, RN compile, native
 modules). When it finishes, the dev client app (named **mobile** on the
-home screen — bundle ID `com.fochs.safehaven`) is installed.
+home screen — bundle ID `com.<your_name>.safehaven`) is installed.
 
 If `pod install` fails with "no such xcode" / signing errors, point
 CocoaPods at the right Xcode once and retry:
