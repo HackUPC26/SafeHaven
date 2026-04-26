@@ -1,15 +1,20 @@
 import AVFoundation
 import ExpoModulesCore
 import SoundAnalysis
+import Vision
 
 private let audioLabelEvent = "onAudioLabel"
 private let audioClassificationDebugEvent = "onAudioClassificationDebug"
+private let videoAnnotationEvent = "onVideoAnnotation"
 private let confidenceThreshold = 0.60
 private let duplicateSuppressionSeconds = 2.0
 private let extendedSilenceSeconds = 5.0
+private let videoSampleInterval = 30
+private let rapidMotionThreshold = 0.065
 
 public final class SafeHavenAIModule: Module {
   private let analysisQueue = DispatchQueue(label: "safehaven.ai.sound-analysis")
+  private let videoQueue = DispatchQueue(label: "safehaven.ai.video-analysis")
   private var audioEngine: AVAudioEngine?
   private var analyzer: SNAudioStreamAnalyzer?
   private var classifyRequest: SNClassifySoundRequest?
@@ -17,11 +22,18 @@ public final class SafeHavenAIModule: Module {
   private var isRunning = false
   private var silenceStartedAt: Date?
   private var lastEmittedAtByLabel: [String: Date] = [:]
+  private var videoSession: AVCaptureSession?
+  private var videoOutput: AVCaptureVideoDataOutput?
+  private var videoObserver: SafeHavenVideoObserver?
+  private var isVideoRunning = false
+  private var videoFrameIndex = 0
+  private var lastPosePoints: [String: CGPoint] = [:]
+  private var consecutiveRapidMotionFrames = 0
 
   public func definition() -> ModuleDefinition {
     Name("SafeHavenAI")
 
-    Events(audioLabelEvent, audioClassificationDebugEvent)
+    Events(audioLabelEvent, audioClassificationDebugEvent, videoAnnotationEvent)
 
     AsyncFunction("isSoundClassificationAvailable") { () -> Bool in
       return Self.soundClassificationAvailable
@@ -36,8 +48,22 @@ public final class SafeHavenAIModule: Module {
       return true
     }
 
+    AsyncFunction("isVideoAnnotationAvailable") { () -> Bool in
+      return Self.videoAnnotationAvailable
+    }
+
+    AsyncFunction("startVideoAnnotation") { (promise: Promise) in
+      self.startVideoAnnotation(promise: promise)
+    }
+
+    AsyncFunction("stopVideoAnnotation") { () -> Bool in
+      self.stopVideoAnnotation()
+      return true
+    }
+
     OnDestroy {
       self.stopSoundClassification()
+      self.stopVideoAnnotation()
     }
   }
 
@@ -47,6 +73,18 @@ public final class SafeHavenAIModule: Module {
     #else
     if #available(iOS 15.0, *) {
       return true
+    }
+    return false
+    #endif
+  }
+
+  private static var videoAnnotationAvailable: Bool {
+    #if targetEnvironment(simulator)
+    return false
+    #else
+    if #available(iOS 15.0, *) {
+      return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) != nil ||
+        AVCaptureDevice.default(for: .video) != nil
     }
     return false
     #endif
@@ -320,6 +358,221 @@ public final class SafeHavenAIModule: Module {
 
     return nil
   }
+
+  private func startVideoAnnotation(promise: Promise) {
+    if isVideoRunning {
+      promise.resolve(true)
+      return
+    }
+
+    guard Self.videoAnnotationAvailable else {
+      print("[SafeHavenAI] Vision video annotation is unavailable on this device")
+      promise.resolve(false)
+      return
+    }
+
+    AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
+      guard let self else {
+        promise.resolve(false)
+        return
+      }
+
+      self.videoQueue.async {
+        guard granted else {
+          print("[SafeHavenAI] Camera permission denied for video annotation")
+          promise.resolve(false)
+          return
+        }
+
+        do {
+          try self.startVideoCaptureOnQueue()
+          promise.resolve(true)
+        } catch {
+          print("[SafeHavenAI] Failed to start video annotation: \(error.localizedDescription)")
+          self.stopVideoAnnotationOnQueue()
+          promise.resolve(false)
+        }
+      }
+    }
+  }
+
+  @discardableResult
+  private func stopVideoAnnotation() -> Bool {
+    videoQueue.async { [weak self] in
+      self?.stopVideoAnnotationOnQueue()
+    }
+
+    return true
+  }
+
+  private func startVideoCaptureOnQueue() throws {
+    if isVideoRunning {
+      return
+    }
+
+    let session = AVCaptureSession()
+    session.beginConfiguration()
+    session.sessionPreset = .vga640x480
+
+    guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front) ??
+      AVCaptureDevice.default(for: .video) else {
+      throw SafeHavenAIError.invalidVideoInput
+    }
+
+    let input = try AVCaptureDeviceInput(device: device)
+    guard session.canAddInput(input) else {
+      throw SafeHavenAIError.invalidVideoInput
+    }
+    session.addInput(input)
+
+    let output = AVCaptureVideoDataOutput()
+    let observer = SafeHavenVideoObserver(owner: self)
+    output.alwaysDiscardsLateVideoFrames = true
+    output.videoSettings = [
+      kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+    ]
+    output.setSampleBufferDelegate(observer, queue: videoQueue)
+
+    guard session.canAddOutput(output) else {
+      throw SafeHavenAIError.invalidVideoInput
+    }
+    session.addOutput(output)
+
+    if let connection = output.connection(with: .video), connection.isVideoMirroringSupported {
+      connection.isVideoMirrored = true
+    }
+
+    session.commitConfiguration()
+    session.startRunning()
+
+    videoSession = session
+    videoOutput = output
+    videoObserver = observer
+    videoFrameIndex = 0
+    lastPosePoints = [:]
+    consecutiveRapidMotionFrames = 0
+    isVideoRunning = true
+  }
+
+  private func stopVideoAnnotationOnQueue() {
+    videoOutput?.setSampleBufferDelegate(nil, queue: nil)
+    videoSession?.stopRunning()
+    videoObserver = nil
+    videoOutput = nil
+    videoSession = nil
+    videoFrameIndex = 0
+    lastPosePoints = [:]
+    consecutiveRapidMotionFrames = 0
+    isVideoRunning = false
+  }
+
+  fileprivate func handleVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+    videoFrameIndex += 1
+    guard videoFrameIndex % videoSampleInterval == 0 else {
+      return
+    }
+
+    let request = VNDetectHumanBodyPoseRequest()
+    let handler = VNImageRequestHandler(cmSampleBuffer: sampleBuffer, orientation: .leftMirrored, options: [:])
+
+    do {
+      try handler.perform([request])
+      let observations = request.results ?? []
+      let bestPose = bestPosePoints(from: observations)
+      let rapidMotion = updateRapidMotion(with: bestPose.points)
+      emitVideoAnnotation(
+        personCount: observations.count,
+        rapidMotion: rapidMotion,
+        confidence: bestPose.confidence
+      )
+    } catch {
+      print("[SafeHavenAI] Vision body pose failed: \(error.localizedDescription)")
+    }
+  }
+
+  private func bestPosePoints(from observations: [VNHumanBodyPoseObservation]) -> (points: [String: CGPoint], confidence: Double) {
+    var bestPoints: [String: CGPoint] = [:]
+    var bestConfidence = 0.0
+
+    for observation in observations {
+      guard let recognizedPoints = try? observation.recognizedPoints(.all) else {
+        continue
+      }
+
+      var points: [String: CGPoint] = [:]
+      var confidenceTotal = 0.0
+
+      for (jointName, point) in recognizedPoints where point.confidence >= 0.30 {
+        points[String(describing: jointName.rawValue)] = point.location
+        confidenceTotal += Double(point.confidence)
+      }
+
+      guard !points.isEmpty else {
+        continue
+      }
+
+      let averageConfidence = confidenceTotal / Double(points.count)
+      if points.count > bestPoints.count || (points.count == bestPoints.count && averageConfidence > bestConfidence) {
+        bestPoints = points
+        bestConfidence = averageConfidence
+      }
+    }
+
+    return (bestPoints, bestConfidence)
+  }
+
+  private func updateRapidMotion(with points: [String: CGPoint]) -> Bool {
+    guard !points.isEmpty else {
+      lastPosePoints = [:]
+      consecutiveRapidMotionFrames = 0
+      return false
+    }
+
+    var displacementTotal = 0.0
+    var sharedPointCount = 0
+
+    for (jointName, point) in points {
+      guard let previousPoint = lastPosePoints[jointName] else {
+        continue
+      }
+
+      displacementTotal += hypot(Double(point.x - previousPoint.x), Double(point.y - previousPoint.y))
+      sharedPointCount += 1
+    }
+
+    lastPosePoints = points
+
+    guard sharedPointCount > 0 else {
+      consecutiveRapidMotionFrames = 0
+      return false
+    }
+
+    let averageDisplacement = displacementTotal / Double(sharedPointCount)
+    if averageDisplacement >= rapidMotionThreshold {
+      consecutiveRapidMotionFrames += 1
+    } else {
+      consecutiveRapidMotionFrames = 0
+    }
+
+    return consecutiveRapidMotionFrames >= 1
+  }
+
+  private func emitVideoAnnotation(personCount: Int, rapidMotion: Bool, confidence: Double) {
+    let now = Date()
+    let poseFlags: [String] = rapidMotion ? ["rapid_motion"] : []
+
+    DispatchQueue.main.async { [weak self] in
+      self?.sendEvent(videoAnnotationEvent, [
+        "personCount": personCount,
+        "rapidMotion": rapidMotion,
+        "sceneContext": "camera",
+        "poseFlags": poseFlags,
+        "confidence": confidence,
+        "source": "Vision",
+        "ts": Int(now.timeIntervalSince1970 * 1000)
+      ])
+    }
+  }
 }
 
 private final class SafeHavenSoundObserver: NSObject, SNResultsObserving {
@@ -347,13 +600,28 @@ private final class SafeHavenSoundObserver: NSObject, SNResultsObserving {
   }
 }
 
+private final class SafeHavenVideoObserver: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+  private weak var owner: SafeHavenAIModule?
+
+  init(owner: SafeHavenAIModule) {
+    self.owner = owner
+  }
+
+  func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+    owner?.handleVideoSampleBuffer(sampleBuffer)
+  }
+}
+
 private enum SafeHavenAIError: LocalizedError {
   case invalidAudioInput
+  case invalidVideoInput
 
   var errorDescription: String? {
     switch self {
     case .invalidAudioInput:
       return "Microphone input format is invalid"
+    case .invalidVideoInput:
+      return "Camera input format is invalid"
     }
   }
 }

@@ -15,7 +15,9 @@ const VALID_LABELS = new Set([
 
 let labelSubscription = null;
 let debugSubscription = null;
+let videoAnnotationSubscription = null;
 let classifierStarted = false;
+let videoAnnotationStarted = false;
 
 function normalizeConfidence(confidence) {
   const value = Number(confidence);
@@ -72,6 +74,50 @@ function ensureDebugSubscription() {
   });
 }
 
+function normalizeVideoAnnotation(payload) {
+  if (!payload) return null;
+
+  const personCount = Number(payload.personCount);
+  const confidence = normalizeConfidence(payload.confidence);
+  const poseFlags = Array.isArray(payload.poseFlags) ? payload.poseFlags : [];
+
+  return {
+    personCount: Number.isFinite(personCount) ? Math.max(0, Math.round(personCount)) : 0,
+    rapidMotion: !!payload.rapidMotion,
+    sceneContext: payload.sceneContext || 'camera',
+    poseFlags,
+    confidence,
+    source: payload.source || 'Vision',
+  };
+}
+
+function forwardVideoAnnotation(payload) {
+  const annotation = normalizeVideoAnnotation(payload);
+  if (!annotation) return false;
+
+  console.log(
+    '[ai] video annotation:',
+    `${annotation.personCount} person(s)`,
+    annotation.rapidMotion ? 'rapid motion' : 'calm',
+    annotation.confidence.toFixed(2)
+  );
+
+  send({
+    event_type: 'ai_video_annotation',
+    annotation,
+  });
+
+  return true;
+}
+
+function ensureVideoAnnotationSubscription() {
+  if (videoAnnotationSubscription) return;
+
+  videoAnnotationSubscription = SafeHavenAI.addVideoAnnotationListener((payload) => {
+    forwardVideoAnnotation(payload);
+  });
+}
+
 export async function startSoundClassification() {
   if (classifierStarted) return true;
 
@@ -115,6 +161,46 @@ export async function stopSoundClassification() {
   return true;
 }
 
+export async function startVideoAnnotation() {
+  if (videoAnnotationStarted) return true;
+
+  ensureVideoAnnotationSubscription();
+
+  try {
+    const available = await SafeHavenAI.isVideoAnnotationAvailable();
+    if (!available) {
+      console.warn('[ai] native video annotation unavailable');
+      return false;
+    }
+
+    videoAnnotationStarted = await SafeHavenAI.startVideoAnnotation();
+    if (!videoAnnotationStarted) {
+      console.warn('[ai] native video annotation did not start');
+    }
+    return videoAnnotationStarted;
+  } catch (err) {
+    videoAnnotationStarted = false;
+    console.warn('[ai] failed to start video annotation:', err?.message ?? err);
+    return false;
+  }
+}
+
+export async function stopVideoAnnotation() {
+  if (!videoAnnotationStarted && !videoAnnotationSubscription) return true;
+
+  try {
+    await SafeHavenAI.stopVideoAnnotation();
+  } catch (err) {
+    console.warn('[ai] failed to stop video annotation:', err?.message ?? err);
+  } finally {
+    videoAnnotationStarted = false;
+    videoAnnotationSubscription?.remove?.();
+    videoAnnotationSubscription = null;
+  }
+
+  return true;
+}
+
 export function emitDemoLabel(label, confidence = 0.9) {
   return forwardAudioLabel({
     label,
@@ -126,4 +212,5 @@ export function emitDemoLabel(label, confidence = 0.9) {
 
 if (typeof __DEV__ !== 'undefined' && __DEV__) {
   global.__safehavenEmitAiLabel = emitDemoLabel;
+  global.__safehavenEmitVideoAnnotation = forwardVideoAnnotation;
 }

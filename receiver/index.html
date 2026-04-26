@@ -459,12 +459,13 @@ function GPSMap({gps, alertMode, trail, height='clamp(320px, 48vh, 560px)'}) {
 }
 
 // ── Video feed ─────────────────────────────────────────────────
-function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, liveStream}) {
+function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, liveStream, feedFrozen}) {
   const ac = alertMode ? '#ff3b5c' : '#22d3ee';
   const personCount = videoAnnotation ? videoAnnotation.personCount : null;
   const poseLabel   = videoAnnotation && videoAnnotation.poseFlags && videoAnnotation.poseFlags.length > 0
     ? videoAnnotation.poseFlags[0].replace(/_/g,' ').toUpperCase()
     : 'Standing';
+  const showFreezeBadge = frozen && (feedFrozen || staleSecs > 0);
   const videoRef = useRef(null);
   const [needsTap, setNeedsTap] = useState(false);
 
@@ -477,6 +478,11 @@ function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, liveStream}) 
     if (!el) return;
     if (liveStream) {
       if (el.srcObject !== liveStream) el.srcObject = liveStream;
+      if (frozen) {
+        el.pause();
+        setNeedsTap(false);
+        return;
+      }
       const p = el.play();
       if (p && p.catch) {
         p.then(() => setNeedsTap(false))
@@ -486,7 +492,7 @@ function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, liveStream}) 
       el.srcObject = null;
       setNeedsTap(false);
     }
-  }, [liveStream]);
+  }, [liveStream, frozen]);
 
   function tapToPlay() {
     const el = videoRef.current;
@@ -503,30 +509,36 @@ function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, liveStream}) 
     return (
       <div style={{position:'relative',height:280,background:'#000',overflow:'hidden',borderRadius:12,flexShrink:0}} onClick={needsTap ? tapToPlay : undefined}>
         <video ref={videoRef} autoPlay playsInline style={{width:'100%',height:'100%',objectFit:'cover',display:'block'}}/>
+        {showFreezeBadge && (
+          <div style={{position:'absolute',inset:0,zIndex:2,background:'rgba(5,10,18,.56)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6,pointerEvents:'none'}}>
+            <div style={{color:'#f59e0b',fontSize:12,fontWeight:700,letterSpacing:1,fontFamily:'monospace'}}>FEED FROZEN</div>
+            <div style={{color:'rgba(255,255,255,.45)',fontSize:10,fontFamily:'monospace'}}>{staleSecs}s since last frame</div>
+          </div>
+        )}
         {needsTap && (
-          <div style={{position:'absolute',inset:0,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:8,background:'rgba(5,10,20,.55)',cursor:'pointer'}}>
+          <div style={{position:'absolute',inset:0,zIndex:5,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:8,background:'rgba(5,10,20,.55)',cursor:'pointer'}}>
             <div style={{width:44,height:44,borderRadius:'50%',background:'#3b82f6',display:'flex',alignItems:'center',justifyContent:'center',fontSize:20}}>🔊</div>
             <div style={{color:'#fff',fontSize:13,fontWeight:600}}>Tap to enable audio</div>
           </div>
         )}
-        <div style={{position:'absolute',top:10,left:10,display:'flex',alignItems:'center',gap:5,background:'rgba(5,10,20,.55)',padding:'3px 8px',borderRadius:6}}>
-          <div style={{width:7,height:7,borderRadius:'50%',background:'#ff3b5c',animation:'recBlink 1s ease-in-out infinite'}}/>
-          <span style={{color:'#fff',fontSize:10,fontWeight:700,fontFamily:'monospace',letterSpacing:1}}>LIVE</span>
+        <div style={{position:'absolute',top:10,left:10,zIndex:4,display:'flex',alignItems:'center',gap:5,background:'rgba(5,10,20,.55)',padding:'3px 8px',borderRadius:6}}>
+          <div style={{width:7,height:7,borderRadius:'50%',background:showFreezeBadge?'#f59e0b':'#ff3b5c',animation:showFreezeBadge?'none':'recBlink 1s ease-in-out infinite'}}/>
+          <span style={{color:'#fff',fontSize:10,fontWeight:700,fontFamily:'monospace',letterSpacing:1}}>{showFreezeBadge ? 'FROZEN' : 'LIVE'}</span>
         </div>
         {personCount != null && (
-          <div style={{position:'absolute',top:10,right:10,background:'rgba(5,10,20,.6)',borderRadius:6,padding:'4px 8px',color:ac,fontSize:10,fontWeight:700,fontFamily:'monospace'}}>
+          <div style={{position:'absolute',top:10,right:10,zIndex:4,background:'rgba(5,10,20,.6)',borderRadius:6,padding:'4px 8px',color:ac,fontSize:10,fontWeight:700,fontFamily:'monospace'}}>
             {`${personCount} PERSON${personCount !== 1 ? 'S' : ''}`}
           </div>
         )}
         {videoAnnotation && (
-          <div style={{position:'absolute',bottom:8,left:8,background:'rgba(5,10,20,.7)',borderRadius:6,padding:'4px 8px',display:'flex',gap:8}}>
+          <div style={{position:'absolute',bottom:8,left:8,zIndex:4,background:'rgba(5,10,20,.7)',borderRadius:6,padding:'4px 8px',display:'flex',gap:8}}>
             {[videoAnnotation.sceneContext || 'Indoor', videoAnnotation.rapidMotion ? 'Rapid motion' : 'Calm'].map(l=>(
               <span key={l} style={{color:'rgba(255,255,255,.7)',fontSize:9,fontFamily:'monospace'}}>{l}</span>
             ))}
           </div>
         )}
         {[[0,0],[1,0],[0,1],[1,1]].map(([cx,cy],i)=>(
-          <div key={i} style={{position:'absolute',[cx?'right':'left']:8,[cy?'bottom':'top']:8,width:16,height:16,borderTop:cy?'none':`1.5px solid ${ac}`,borderBottom:cy?`1.5px solid ${ac}`:'none',borderLeft:cx?'none':`1.5px solid ${ac}`,borderRight:cx?`1.5px solid ${ac}`:'none',opacity:.7}}/>
+          <div key={i} style={{position:'absolute',zIndex:4,[cx?'right':'left']:8,[cy?'bottom':'top']:8,width:16,height:16,borderTop:cy?'none':`1.5px solid ${ac}`,borderBottom:cy?`1.5px solid ${ac}`:'none',borderLeft:cx?'none':`1.5px solid ${ac}`,borderRight:cx?`1.5px solid ${ac}`:'none',opacity:.7}}/>
         ))}
       </div>
     );
@@ -552,36 +564,36 @@ function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, liveStream}) 
         </div>
       )}
       {/* P1 annotation */}
-      <div style={{position:'absolute',left:'calc(22% - 8px)',bottom:22,width:52,height:118,border:`1.5px solid ${ac}`,boxShadow:`0 0 8px ${alertMode?'rgba(255,59,92,.3)':'rgba(34,211,238,.2)'}`,borderRadius:4,pointerEvents:'none'}}>
+      {videoAnnotation && <div style={{position:'absolute',zIndex:4,left:'calc(22% - 8px)',bottom:22,width:52,height:118,border:`1.5px solid ${ac}`,boxShadow:`0 0 8px ${alertMode?'rgba(255,59,92,.3)':'rgba(34,211,238,.2)'}`,borderRadius:4,pointerEvents:'none'}}>
         <div style={{position:'absolute',top:-20,left:0,background:ac,color:'#000',fontSize:9,fontWeight:700,fontFamily:'monospace',padding:'2px 5px',borderRadius:'3px 3px 3px 0',whiteSpace:'nowrap'}}>
           P1 · {videoAnnotation ? poseLabel : '—'} {videoAnnotation ? `· ${Math.round((videoAnnotation.confidence||0.87)*100)}%` : ''}
         </div>
-      </div>
-      {personCount !== 1 && (
-        <div style={{position:'absolute',left:'calc(60% - 6px)',bottom:22,width:42,height:82,border:'1.5px solid #f59e0b',boxShadow:'0 0 8px rgba(245,158,11,.2)',borderRadius:4,pointerEvents:'none'}}>
+      </div>}
+      {videoAnnotation && personCount !== 1 && (
+        <div style={{position:'absolute',zIndex:4,left:'calc(60% - 6px)',bottom:22,width:42,height:82,border:'1.5px solid #f59e0b',boxShadow:'0 0 8px rgba(245,158,11,.2)',borderRadius:4,pointerEvents:'none'}}>
           <div style={{position:'absolute',top:-20,left:0,background:'#f59e0b',color:'#000',fontSize:9,fontWeight:700,fontFamily:'monospace',padding:'2px 5px',borderRadius:'3px 3px 3px 0',whiteSpace:'nowrap'}}>
             P2 · Seated · 82%
           </div>
         </div>
       )}
       {videoAnnotation && (
-        <div style={{position:'absolute',bottom:8,left:8,background:'rgba(5,10,20,.85)',borderRadius:6,padding:'4px 8px',display:'flex',gap:8}}>
+        <div style={{position:'absolute',zIndex:4,bottom:8,left:8,background:'rgba(5,10,20,.85)',borderRadius:6,padding:'4px 8px',display:'flex',gap:8}}>
           {[videoAnnotation.sceneContext || 'Indoor', videoAnnotation.rapidMotion ? 'Rapid motion' : 'Calm'].map(l=>(
             <span key={l} style={{color:'rgba(255,255,255,.55)',fontSize:9,fontFamily:'monospace'}}>{l}</span>
           ))}
         </div>
       )}
-      <div style={{position:'absolute',top:10,right:10,background:'rgba(5,10,20,.85)',borderRadius:6,padding:'4px 8px',color:ac,fontSize:10,fontWeight:700,fontFamily:'monospace'}}>
+      {videoAnnotation && <div style={{position:'absolute',zIndex:4,top:10,right:10,background:'rgba(5,10,20,.85)',borderRadius:6,padding:'4px 8px',color:ac,fontSize:10,fontWeight:700,fontFamily:'monospace'}}>
         {personCount != null ? `${personCount} PERSON${personCount !== 1 ? 'S' : ''}` : '— PERSONS'}
-      </div>
+      </div>}
       {!frozen ? (
-        <div style={{position:'absolute',top:10,left:10,display:'flex',alignItems:'center',gap:5}}>
+        <div style={{position:'absolute',zIndex:4,top:10,left:10,display:'flex',alignItems:'center',gap:5}}>
           <div style={{width:7,height:7,borderRadius:'50%',background:'#ff3b5c',animation:'recBlink 1s ease-in-out infinite'}}/>
           <span style={{color:'#fff',fontSize:10,fontWeight:700,fontFamily:'monospace',letterSpacing:1}}>LIVE</span>
         </div>
       ) : (
-        <div style={{position:'absolute',inset:0,background:'rgba(5,10,18,.7)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6}}>
-          {staleSecs > 0 ? (
+        <div style={{position:'absolute',inset:0,zIndex:showFreezeBadge?2:8,background:'rgba(5,10,18,.7)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6}}>
+          {showFreezeBadge ? (
             <>
               <div style={{color:'#f59e0b',fontSize:12,fontWeight:700,letterSpacing:1,fontFamily:'monospace'}}>FEED FROZEN</div>
               <div style={{color:'rgba(255,255,255,.45)',fontSize:10,fontFamily:'monospace'}}>{staleSecs}s since last frame</div>
@@ -596,7 +608,7 @@ function VideoFeed({alertMode, frozen, staleSecs, videoAnnotation, liveStream}) 
       )}
       {!frozen && <div style={{position:'absolute',left:0,right:0,height:40,background:'linear-gradient(transparent,rgba(255,255,255,.025),transparent)',animation:'scanline 3s linear infinite',pointerEvents:'none'}}/>}
       {[[0,0],[1,0],[0,1],[1,1]].map(([cx,cy],i)=>(
-        <div key={i} style={{position:'absolute',[cx?'right':'left']:8,[cy?'bottom':'top']:8,width:16,height:16,borderTop:cy?'none':`1.5px solid ${ac}`,borderBottom:cy?`1.5px solid ${ac}`:'none',borderLeft:cx?'none':`1.5px solid ${ac}`,borderRight:cx?`1.5px solid ${ac}`:'none',opacity:.7}}/>
+        <div key={i} style={{position:'absolute',zIndex:4,[cx?'right':'left']:8,[cy?'bottom':'top']:8,width:16,height:16,borderTop:cy?'none':`1.5px solid ${ac}`,borderBottom:cy?`1.5px solid ${ac}`:'none',borderLeft:cx?'none':`1.5px solid ${ac}`,borderRight:cx?`1.5px solid ${ac}`:'none',opacity:.7}}/>
       ))}
     </div>
   );
@@ -733,7 +745,9 @@ function WaitingScreen() {
 function App() {
   const {connected, session, tier, gps, trail, audioLabels, incidentLog, videoAnnotation, videoFrozen, staleSecs, elapsed, riskLevel, alertMode, addEntry, setConnected, reset} = useIncidentState();
   const [tab, setTab] = useState('live');
+  const [annotationsEnabled, setAnnotationsEnabled] = useState(true);
   const [feedFrozen, setFeedFrozen] = useState(false);
+  const [simulatedFreezeSecs, setSimulatedFreezeSecs] = useState(0);
   const liveStream = useLiveStream();
   const audioLevels = useAudioLevels(liveStream);
 
@@ -748,6 +762,23 @@ function App() {
 
   const gpsCoords = gps ? `${gps.lat.toFixed(4)}° N · ${gps.lng.toFixed(4)}° E` : null;
   const callHref  = gps ? `tel:112?body=Emergency+at+${gps.lat},${gps.lng}` : 'tel:112';
+  const visibleVideoAnnotation = annotationsEnabled ? videoAnnotation : null;
+  const effectiveVideoFrozen = (videoFrozen && !liveStream) || feedFrozen;
+  const effectiveStaleSecs = feedFrozen ? simulatedFreezeSecs : staleSecs;
+
+  useEffect(() => {
+    if (!feedFrozen) {
+      setSimulatedFreezeSecs(0);
+      return;
+    }
+    setSimulatedFreezeSecs(1);
+    const id = setInterval(() => setSimulatedFreezeSecs(s => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [feedFrozen]);
+
+  function toggleFeedFrozen() {
+    setFeedFrozen(prev => !prev);
+  }
 
   // Dev: dispatch a simulated SOS sequence
   const simulateSOS = () => {
@@ -761,7 +792,6 @@ function App() {
       {seq:3, ts:now+400,  type:'ai_label',   payload:{label:'SHOUTING', confidence:0.88, source:'SoundAnalysis'}},
       {seq:4, ts:now+800,  type:'tier_change', payload:{fromTier:1, toTier:2, trigger:'ai_auto'}},
       {seq:5, ts:now+1200, type:'ai_label',   payload:{label:'IMPACT', confidence:0.81, source:'SoundAnalysis'}},
-      {seq:6, ts:now+1600, type:'ai_video_annotation', payload:{personCount:2, rapidMotion:true, sceneContext:'indoor', poseFlags:['aggressive_posture'], confidence:0.94}},
       {seq:7, ts:now+2000, type:'tier_change', payload:{fromTier:2, toTier:3, trigger:'ai_auto'}},
       {seq:8, ts:now+2200, type:'ai_label',   payload:{label:'CRYING', confidence:0.97, source:'SoundAnalysis'}},
     ];
@@ -769,7 +799,11 @@ function App() {
     setConnected(true);
   };
 
-  const dismiss = () => reset();
+  const dismiss = () => {
+    setFeedFrozen(false);
+    setAnnotationsEnabled(true);
+    reset();
+  };
 
   return (
     <div style={{
@@ -822,7 +856,15 @@ function App() {
 
         {connected && tab==='live' && (
           <div style={{display:'flex',flexDirection:'column',gap:10,animation:'slideUp .3s ease',padding:'0 14px 14px'}}>
-            <VideoFeed alertMode={alertMode} frozen={videoFrozen && !liveStream} staleSecs={staleSecs} videoAnnotation={videoAnnotation} liveStream={liveStream}/>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={()=>setAnnotationsEnabled(v=>!v)} style={{flex:1,padding:'9px 10px',borderRadius:10,border:`1px solid ${annotationsEnabled?'rgba(34,211,238,.35)':'rgba(255,255,255,.1)'}`,cursor:'pointer',fontFamily:'ui-monospace,Menlo,monospace',background:annotationsEnabled?'rgba(34,211,238,.12)':'rgba(255,255,255,.05)',color:annotationsEnabled?'#67e8f9':'rgba(255,255,255,.45)',fontSize:11,fontWeight:700,letterSpacing:.5}}>
+                {annotationsEnabled ? 'AI ANNOTATIONS ON' : 'AI ANNOTATIONS OFF'}
+              </button>
+              <button onClick={toggleFeedFrozen} style={{flex:1,padding:'9px 10px',borderRadius:10,border:`1px solid ${feedFrozen?'rgba(245,158,11,.45)':'rgba(255,255,255,.1)'}`,cursor:'pointer',fontFamily:'ui-monospace,Menlo,monospace',background:feedFrozen?'rgba(245,158,11,.13)':'rgba(255,255,255,.05)',color:feedFrozen?'#fbbf24':'rgba(255,255,255,.45)',fontSize:11,fontWeight:700,letterSpacing:.5}}>
+                {feedFrozen ? 'RESUME FEED' : 'FREEZE FEED'}
+              </button>
+            </div>
+            <VideoFeed alertMode={alertMode} frozen={effectiveVideoFrozen} staleSecs={effectiveStaleSecs} videoAnnotation={visibleVideoAnnotation} liveStream={liveStream} feedFrozen={feedFrozen}/>
             <AudioPanel alertMode={alertMode} audioLabels={audioLabels} levels={audioLevels}/>
           </div>
         )}
@@ -883,9 +925,6 @@ function App() {
         <div style={{display:'flex',gap:8}}>
           <button onClick={simulateSOS} style={{flex:1,padding:'8px',borderRadius:10,border:'1px solid rgba(255,59,92,.3)',cursor:'pointer',fontFamily:'inherit',background:'rgba(255,59,92,.15)',color:'#ff8099',fontSize:12}}>
             ⚠ Simulate SOS Alert
-          </button>
-          <button onClick={()=>setFeedFrozen(f=>!f)} style={{flex:1,padding:'8px',borderRadius:10,border:'1px solid rgba(255,255,255,.1)',cursor:'pointer',fontFamily:'inherit',background:feedFrozen?'rgba(59,130,246,.15)':'rgba(255,255,255,.06)',color:feedFrozen?'#93c5fd':'rgba(255,255,255,.4)',fontSize:12}}>
-            {feedFrozen ? '▶ Resume Feed' : '⏸ Freeze Feed'}
           </button>
         </div>
 
