@@ -15,6 +15,7 @@
     "bare-rpc": "^1.2.0",
     "corestore": "^7.9.2",
     "expo": "~54.0.33",
+    "expo-battery": "~10.0.8",
     "expo-camera": "~17.0.10",
     "expo-clipboard": "~7.0.1",
     "expo-dev-client": "~6.0.20",

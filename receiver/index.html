@@ -17,6 +17,8 @@
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body,#root{height:100%;overflow:hidden;}
@@ -90,12 +92,36 @@ function tsToTime(ts) {
   return new Date(ts).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
 }
 
+function headingToCardinal(deg) {
+  if (deg == null) return '—';
+  const dirs = ['N','NE','E','SE','S','SW','W','NW'];
+  return dirs[Math.round(((deg % 360) + 360) % 360 / 45) % 8] + ' ' + Math.round(deg) + '°';
+}
+
+function signalStrength(accuracy) {
+  if (accuracy == null) return {label:'—', color:'rgba(255,255,255,.3)'};
+  if (accuracy <= 5)  return {label:'Strong',   color:'#34d399'};
+  if (accuracy <= 15) return {label:'Good',      color:'#3b82f6'};
+  if (accuracy <= 30) return {label:'Moderate',  color:'#f59e0b'};
+  return                     {label:'Weak',      color:'#ff3b5c'};
+}
+
+function formatBatteryHealth(gps) {
+  if (!gps) return null;
+  if (gps.battery_health === 'power-save') return 'Power save';
+  if (gps.battery_health) return gps.battery_health.toUpperCase();
+  if (gps.battery_state) return gps.battery_state.toUpperCase();
+  return null;
+}
+
+
 // ── Incident state — driven by Hypercore entries ────────────────
 function useIncidentState() {
   const [connected, setConnected]           = useState(false);
   const [session, setSession]               = useState(null);     // {personName, startTs}
   const [tier, setTier]                     = useState(0);
   const [gps, setGps]                       = useState(null);     // latest gps payload
+  const [trail, setTrail]                   = useState([]);       // [{lat,lng}] movement history
   const [audioLabels, setAudioLabels]       = useState([]);       // [{time,eventType,label,conf}]
   const [incidentLog, setIncidentLog]       = useState([]);       // [{ts,label,sub,dot}]
   const [videoAnnotation, setVideoAnnotation] = useState(null);
@@ -128,6 +154,7 @@ function useIncidentState() {
 
       case 'gps':
         setGps(payload);
+        setTrail(prev => [...prev.slice(-49), {lat: payload.lat, lng: payload.lng}]);
         pushLog({ts, label:'Location update', sub: payload.address || `${payload.lat.toFixed(4)}° N  ${payload.lng.toFixed(4)}° E`, dot:'blue'});
         break;
 
@@ -169,6 +196,7 @@ function useIncidentState() {
     setSession(null);
     setTier(0);
     setGps(null);
+    setTrail([]);
     setAudioLabels([]);
     setIncidentLog([]);
     setVideoAnnotation(null);
@@ -207,7 +235,7 @@ function useIncidentState() {
   const riskLevel = tier >= 3 ? 'HIGH' : tier >= 1 ? 'MED' : 'LOW';
   const alertMode = tier >= 3;
 
-  return {connected, session, tier, gps, audioLabels, incidentLog, videoAnnotation, videoFrozen, staleSecs, elapsed, riskLevel, alertMode, addEntry, setConnected, reset};
+  return {connected, session, tier, gps, trail, audioLabels, incidentLog, videoAnnotation, videoFrozen, staleSecs, elapsed, riskLevel, alertMode, addEntry, setConnected, reset};
 }
 
 // ── Live MediaStream channel — set by the WebRTC signaling layer below
@@ -292,55 +320,122 @@ function useAudioLevels(stream, barCount = 44) {
   return levels;
 }
 
-// ── GPS Map ────────────────────────────────────────────────────
-function GPSMap({gps, alertMode}) {
-  const ac = alertMode ? '#ff3b5c' : '#3b82f6';
+// ── GPS Map (Leaflet + CARTO dark tiles — free, no API key) ───
+function GPSMap({gps, alertMode, trail, height='clamp(320px, 48vh, 560px)'}) {
+  const mapDivRef    = useRef(null);
+  const mapRef       = useRef(null);
+  const markerRef    = useRef(null);
+  const circleRef    = useRef(null);
+  const polyRef      = useRef(null);
+  const geocodeTimer = useRef(null);
+  const [address, setAddress] = useState(null);
+
+  const ac     = alertMode ? '#ff3b5c' : '#3b82f6';
+  const stroke = alertMode ? '#ffaabb' : '#93c5fd';
   const hasFix = gps && gps.lat != null;
-  const blocks = useMemo(() => {
-    const arr = [];
-    for (let r = 0; r < 9; r++) for (let c = 0; c < 11; c++) {
-      const x=28+c*34, y=28+r*34, C=5, w=26, h=26;
-      const pts=[[x+C,y],[x+w-C,y],[x+w,y+C],[x+w,y+h-C],[x+w-C,y+h],[x+C,y+h],[x,y+h-C],[x,y+C]].map(p=>p.join(',')).join(' ');
-      arr.push(<polygon key={`${r}-${c}`} points={pts} fill="#0e1b2b" stroke="#172438" strokeWidth="0.8"/>);
-    }
-    return arr;
+
+  // Initialize Leaflet map once on mount
+  useEffect(() => {
+    if (!mapDivRef.current || mapRef.current) return;
+    const center = gps ? [gps.lat, gps.lng] : [41.3970, 2.1606];
+    const map = L.map(mapDivRef.current, {
+      center, zoom: 17,
+      zoomControl: false,
+      attributionControl: false,
+    });
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd', maxZoom: 20,
+    }).addTo(map);
+    mapRef.current = map;
+    return () => {
+      map.remove();
+      mapRef.current = null; markerRef.current = null;
+      circleRef.current = null; polyRef.current = null;
+    };
   }, []);
 
+  // Update marker + accuracy circle + pan + geocode on GPS change
+  useEffect(() => {
+    if (!mapRef.current || !gps) return;
+    const ll = [gps.lat, gps.lng];
+
+    if (!markerRef.current) {
+      markerRef.current = L.circleMarker(ll, {
+        radius: 8, fillColor: ac, fillOpacity: 1, color: stroke, weight: 2.5,
+      }).addTo(mapRef.current);
+    } else {
+      markerRef.current.setLatLng(ll);
+      markerRef.current.setStyle({fillColor: ac, color: stroke});
+    }
+
+    if (!circleRef.current) {
+      circleRef.current = L.circle(ll, {
+        radius: Math.max(gps.accuracy || 10, 3),
+        fillColor: ac, fillOpacity: 0.07,
+        color: ac, opacity: 0.3, weight: 1,
+      }).addTo(mapRef.current);
+    } else {
+      circleRef.current.setLatLng(ll);
+      circleRef.current.setRadius(Math.max(gps.accuracy || 10, 3));
+      circleRef.current.setStyle({fillColor: ac, color: ac});
+    }
+
+    mapRef.current.panTo(ll);
+
+    if (gps.address) {
+      setAddress(gps.address);
+    } else {
+      clearTimeout(geocodeTimer.current);
+      geocodeTimer.current = setTimeout(() => {
+        fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${gps.lat}&lon=${gps.lng}&zoom=18`, {
+          headers: {'Accept-Language': 'en'}
+        })
+        .then(r => r.json())
+        .then(d => {
+          const road = d.address?.road;
+          const num  = d.address?.house_number;
+          setAddress(road ? `${road}${num ? ', ' + num : ''}` : (d.display_name || '').split(',')[0]);
+        })
+        .catch(() => {});
+      }, 600);
+    }
+  }, [gps, alertMode]);
+
+  // Redraw movement trail
+  useEffect(() => {
+    if (!mapRef.current) return;
+    if (polyRef.current) { polyRef.current.remove(); polyRef.current = null; }
+    if (!trail || trail.length < 2) return;
+    polyRef.current = L.polyline(trail.map(p => [p.lat, p.lng]), {
+      color: ac, opacity: 0.55, weight: 3,
+    }).addTo(mapRef.current);
+  }, [trail, alertMode]);
+
+  const displayAddr = address || (hasFix ? `${gps.lat.toFixed(4)}° N, ${gps.lng.toFixed(4)}° E` : null);
+
   return (
-    <div style={{position:'relative'}}>
-      <svg viewBox="0 0 362 270" width="100%" style={{display:'block'}}>
-        <rect width="362" height="270" fill="#091420"/>
-        {[38,72,106,140,174,208,242].map((y,i)=><line key={`h${i}`} x1="0" y1={y} x2="362" y2={y} stroke={i===3?'#1e3060':'#111f35'} strokeWidth={i===3?5:3}/>)}
-        {[28,62,96,130,164,198,232,266,300,334].map((x,i)=><line key={`v${i}`} x1={x} y1="0" x2={x} y2="270" stroke={i===5?'#1e3060':'#111f35'} strokeWidth={i===5?5:3}/>)}
-        <line x1="0" y1="70" x2="362" y2="210" stroke="#1a2a50" strokeWidth="6"/>
-        {blocks}
-        {hasFix && <>
-          <circle cx={185} cy={135} r="10" fill="none" stroke={ac} strokeWidth="1.5">
-            <animate attributeName="r" values="10;28" dur="1.4s" repeatCount="indefinite"/>
-            <animate attributeName="opacity" values=".7;0" dur="1.4s" repeatCount="indefinite"/>
-          </circle>
-          {alertMode && <circle cx={185} cy={135} r="10" fill="none" stroke={ac} strokeWidth="1.5">
-            <animate attributeName="r" values="10;28" dur="1.4s" begin=".5s" repeatCount="indefinite"/>
-            <animate attributeName="opacity" values=".7;0" dur="1.4s" begin=".5s" repeatCount="indefinite"/>
-          </circle>}
-          <circle cx={185} cy={135} r="22" fill={alertMode?'rgba(255,59,92,.06)':'rgba(59,130,246,.07)'} stroke={alertMode?'rgba(255,59,92,.25)':'rgba(59,130,246,.2)'} strokeWidth="1"/>
-          <circle cx={185} cy={135} r="6" fill={ac} stroke={alertMode?'#ff8099':'#93c5fd'} strokeWidth="2"/>
-          <rect x="197" y="115" width="150" height="16" rx="3" fill="rgba(5,12,24,.9)"/>
-          <text x="201" y="127" fontSize="8" fill={alertMode?'#ff8099':'#6eaaff'} fontFamily="monospace">
-            {gps.lat.toFixed(4)}° N  {gps.lng.toFixed(4)}° E
-          </text>
-        </>}
-        {!hasFix && <text x="181" y="135" fontSize="11" fill="rgba(255,255,255,.2)" fontFamily="monospace" textAnchor="middle">Awaiting GPS fix…</text>}
-        <defs><radialGradient id="vig" cx="50%" cy="50%" r="70%"><stop offset="0%" stopColor="transparent"/><stop offset="100%" stopColor="rgba(5,10,20,.5)"/></radialGradient></defs>
-        <rect width="362" height="270" fill="url(#vig)"/>
-      </svg>
+    <div style={{position:'relative', overflow:'hidden'}}>
+      <div ref={mapDivRef} style={{width:'100%', height, background:'#091420'}}/>
+      {!hasFix && (
+        <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'none'}}>
+          <div style={{color:'rgba(255,255,255,.2)',fontSize:11,fontFamily:'monospace'}}>Awaiting GPS fix…</div>
+        </div>
+      )}
       {hasFix && (
-        <div style={{position:'absolute',bottom:8,left:8,background:'rgba(5,10,20,.9)',borderRadius:8,padding:'6px 10px',border:`1px solid ${alertMode?'rgba(255,59,92,.4)':'rgba(59,130,246,.3)'}`}}>
-          <div style={{color:alertMode?'#ff8099':'#93c5fd',fontSize:11,fontWeight:600}}>
-            {alertMode ? '⚠ ' : '📍 '}{gps.address || `${gps.lat.toFixed(4)}° N, ${gps.lng.toFixed(4)}° E`}
+        <div style={{position:'absolute',top:8,right:8,background:'rgba(5,10,20,.88)',borderRadius:6,padding:'4px 9px',border:`0.5px solid ${alertMode?'rgba(255,59,92,.35)':'rgba(59,130,246,.3)'}`,pointerEvents:'none',zIndex:1000}}>
+          <div style={{color:alertMode?'#ffaabb':'#6eaaff',fontSize:10,fontFamily:'monospace',letterSpacing:.3}}>
+            {gps.lat.toFixed(4)}° N  {gps.lng.toFixed(4)}° E
           </div>
-          <div style={{color:'rgba(255,255,255,.35)',fontSize:10,marginTop:1,fontFamily:'monospace'}}>
-            ±{gps.accuracy != null ? `${gps.accuracy.toFixed(0)} m` : '— m'}
+        </div>
+      )}
+      {hasFix && (
+        <div style={{position:'absolute',bottom:8,left:8,background:'rgba(5,10,20,.92)',borderRadius:8,padding:'7px 11px',border:`1px solid ${alertMode?'rgba(255,59,92,.4)':'rgba(59,130,246,.3)'}`,maxWidth:'78%',pointerEvents:'none',zIndex:1000}}>
+          <div style={{color:alertMode?'#ff8099':'#93c5fd',fontSize:11,fontWeight:600,display:'flex',alignItems:'center',gap:4}}>
+            <span>{alertMode ? '⚠' : '📍'}</span>
+            <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{displayAddr}</span>
+          </div>
+          <div style={{color:'rgba(255,255,255,.45)',fontSize:10,marginTop:3,fontFamily:'monospace'}}>
+            {gps.lat.toFixed(4)}° N · {gps.lng.toFixed(4)}° E · ±{gps.accuracy != null ? `${gps.accuracy.toFixed(0)} m` : '—'}
           </div>
         </div>
       )}
@@ -544,7 +639,7 @@ function AudioPanel({alertMode, audioLabels, levels}) {
 }
 
 // ── Risk banner ────────────────────────────────────────────────
-function RiskBanner({level}) {
+function RiskBanner({level, signalCount}) {
   const cfg = {
     HIGH:{bg:'rgba(255,59,92,.12)',border:'rgba(255,59,92,.45)',dot:'#ff3b5c',dotAnim:'pulseDot',   tag:'HIGH RISK', text:'Critical signals detected. Recommend immediate intervention.',tagBg:'#ff3b5c'},
     MED: {bg:'rgba(245,158,11,.09)',border:'rgba(245,158,11,.4)',dot:'#f59e0b',dotAnim:'pulseAmber',tag:'ELEVATED',  text:'Raised voices or restricted movement detected. Situation escalating.',tagBg:'#f59e0b'},
@@ -556,7 +651,7 @@ function RiskBanner({level}) {
       <div style={{flex:1}}>
         <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
           <span style={{background:cfg.tagBg,color:'#000',fontSize:9,fontWeight:800,letterSpacing:1,padding:'2px 7px',borderRadius:99,fontFamily:'monospace'}}>{cfg.tag}</span>
-          <span style={{color:'rgba(255,255,255,.3)',fontSize:10,fontFamily:'monospace'}}>AI synthesis</span>
+          <span style={{color:'rgba(255,255,255,.3)',fontSize:10,fontFamily:'monospace'}}>AI synthesis{signalCount > 0 ? ` · ${signalCount} signals` : ''}</span>
         </div>
         <div style={{color:'rgba(255,255,255,.75)',fontSize:12,lineHeight:1.5}}>{cfg.text}</div>
       </div>
@@ -565,11 +660,14 @@ function RiskBanner({level}) {
 }
 
 // ── Stat pill ──────────────────────────────────────────────────
-function Pill({label, value, color='#3b82f6'}) {
+function Pill({label, value, color='#3b82f6', subvalue=null}) {
   return (
-    <div style={{flex:1,background:'rgba(255,255,255,.04)',border:'0.5px solid rgba(255,255,255,.07)',borderRadius:12,padding:'10px 12px'}}>
-      <div style={{color:'rgba(255,255,255,.35)',fontSize:10,letterSpacing:.5,marginBottom:3}}>{label}</div>
-      <div style={{color,fontSize:16,fontWeight:700,fontFamily:'monospace'}}>{value}</div>
+    <div style={{flex:1,background:'rgba(255,255,255,.04)',border:'0.5px solid rgba(255,255,255,.07)',borderRadius:12,padding:'7px 9px'}}>
+      <div style={{color:'rgba(255,255,255,.35)',fontSize:9,letterSpacing:.45,marginBottom:2}}>{label}</div>
+      <div style={{color,fontSize:14,fontWeight:700,fontFamily:'monospace'}}>{value}</div>
+      {subvalue && (
+        <div style={{color:'rgba(255,255,255,.45)',fontSize:9,marginTop:2,fontFamily:'monospace'}}>{subvalue}</div>
+      )}
     </div>
   );
 }
@@ -618,8 +716,9 @@ function WaitingScreen() {
 
 // ── App ────────────────────────────────────────────────────────
 function App() {
-  const {connected, session, tier, gps, audioLabels, incidentLog, videoAnnotation, videoFrozen, staleSecs, elapsed, riskLevel, alertMode, addEntry, setConnected, reset} = useIncidentState();
+  const {connected, session, tier, gps, trail, audioLabels, incidentLog, videoAnnotation, videoFrozen, staleSecs, elapsed, riskLevel, alertMode, addEntry, setConnected, reset} = useIncidentState();
   const [tab, setTab] = useState('live');
+  const [feedFrozen, setFeedFrozen] = useState(false);
   const liveStream = useLiveStream();
   const audioLevels = useAudioLevels(liveStream);
 
@@ -642,7 +741,7 @@ function App() {
       addEntry({seq:0, ts:now, type:'incident_start', payload:{personName:'Ana López', appVersion:'1.0.0', pubkey:'demo'}});
     }
     const events = [
-      {seq:1, ts:now+100,  type:'gps',       payload:{lat:41.3970, lng:2.1606, accuracy:4, heading:52, speed:0.9, address:'Carrer de Provença, 289'}},
+      {seq:1, ts:now+100,  type:'gps',       payload:{lat:41.3970, lng:2.1606, accuracy:4, heading:52, speed:0, altitude:11, battery:0.72, address:'Carrer de Mallorca, 256'}},
       {seq:2, ts:now+200,  type:'tier_change',payload:{fromTier:0, toTier:1, trigger:'codeword'}},
       {seq:3, ts:now+400,  type:'ai_label',   payload:{label:'SHOUTING', confidence:0.88, source:'SoundAnalysis'}},
       {seq:4, ts:now+800,  type:'tier_change', payload:{fromTier:1, toTier:2, trigger:'ai_auto'}},
@@ -691,7 +790,7 @@ function App() {
           </div>
         </div>
 
-        <div style={{marginBottom:8}}><RiskBanner level={riskLevel}/></div>
+        <div style={{marginBottom:8}}><RiskBanner level={riskLevel} signalCount={audioLabels.length}/></div>
 
         <div style={{display:'flex',gap:3,background:'rgba(255,255,255,.05)',borderRadius:12,padding:3,marginBottom:8}}>
           {[['live','Live'],['map','Map'],['log','Log']].map(([id,label])=>(
@@ -714,18 +813,18 @@ function App() {
         )}
 
         {connected && tab==='map' && (
-          <div style={{display:'flex',flexDirection:'column',gap:10,animation:'slideUp .3s ease',paddingBottom:14}}>
-            <GPSMap gps={gps} alertMode={alertMode}/>
-            <div style={{padding:'0 14px', display:'flex', flexDirection:'column', gap:10}}>
-              <div style={{display:'flex',gap:8}}>
-                <Pill label="BATTERY"  value="—"   color="#34d399"/>
-                <Pill label="ACCURACY" value={gps ? `${gps.accuracy != null ? gps.accuracy.toFixed(0) : '—'} m` : '—'} color="#3b82f6"/>
-                <Pill label="SPEED"    value={gps && gps.speed != null ? `${(gps.speed * 3.6).toFixed(1)} km/h` : '—'} color="#a78bfa"/>
+          <div style={{display:'flex',flexDirection:'column',gap:8,animation:'slideUp .3s ease',paddingBottom:10}}>
+            <GPSMap gps={gps} alertMode={alertMode} trail={trail} height={'clamp(310px, 44vh, 520px)'}/>
+            <div style={{padding:'0 14px', display:'flex', flexDirection:'column', gap:8}}>
+              <div style={{display:'flex',gap:6}}>
+                <Pill label="BATTERY" value={gps && gps.battery != null ? `${Math.round(gps.battery * 100)}%` : '—'} subvalue={formatBatteryHealth(gps)} color="#34d399"/>
+                <Pill label="ACCURACY" value={gps && gps.accuracy != null ? `${gps.accuracy.toFixed(0)} m` : '—'} color="#3b82f6"/>
+                <Pill label="SPEED" value={gps && gps.speed != null ? `${(gps.speed * 3.6).toFixed(1)} km/h` : '—'} color="#a78bfa"/>
               </div>
-              <div style={{display:'flex',gap:8}}>
-                <Pill label="HEADING"  value={gps && gps.heading != null ? `${gps.heading.toFixed(0)}°` : '—'} color="#f59e0b"/>
+              <div style={{display:'flex',gap:6}}>
+                <Pill label="HEADING" value={gps ? headingToCardinal(gps.heading) : '—'} color="#f59e0b"/>
                 <Pill label="ALTITUDE" value={gps && gps.altitude != null ? `${gps.altitude.toFixed(0)} m` : '—'} color="#38bdf8"/>
-                <Pill label="SIGNAL"   value={connected ? 'P2P' : '—'} color="#34d399"/>
+                {(()=>{const s=signalStrength(gps&&gps.accuracy);return <Pill label="SIGNAL" value={s.label} color={s.color}/>;})()}
               </div>
             </div>
           </div>
@@ -768,10 +867,10 @@ function App() {
 
         <div style={{display:'flex',gap:8}}>
           <button onClick={simulateSOS} style={{flex:1,padding:'8px',borderRadius:10,border:'1px solid rgba(255,59,92,.3)',cursor:'pointer',fontFamily:'inherit',background:'rgba(255,59,92,.15)',color:'#ff8099',fontSize:12}}>
-            ⚠ Simulate SOS
+            ⚠ Simulate SOS Alert
           </button>
-          <button onClick={dismiss} style={{flex:1,padding:'8px',borderRadius:10,border:'1px solid rgba(255,255,255,.1)',cursor:'pointer',fontFamily:'inherit',background:'rgba(255,255,255,.06)',color:'rgba(255,255,255,.4)',fontSize:12}}>
-            ✕ Dismiss
+          <button onClick={()=>setFeedFrozen(f=>!f)} style={{flex:1,padding:'8px',borderRadius:10,border:'1px solid rgba(255,255,255,.1)',cursor:'pointer',fontFamily:'inherit',background:feedFrozen?'rgba(59,130,246,.15)':'rgba(255,255,255,.06)',color:feedFrozen?'#93c5fd':'rgba(255,255,255,.4)',fontSize:12}}>
+            {feedFrozen ? '▶ Resume Feed' : '⏸ Freeze Feed'}
           </button>
         </div>
 
@@ -876,6 +975,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
           heading:  payload.heading  != null ? Number(payload.heading)  : null,
           speed:    payload.speed    != null ? Number(payload.speed)    : null,
           altitude: payload.altitude != null ? Number(payload.altitude) : null,
+          battery:  payload.battery  != null ? Number(payload.battery)  : null,
+          battery_state: payload.battery_state || null,
+          battery_health: payload.battery_health || null,
+          low_power_mode: payload.low_power_mode != null ? !!payload.low_power_mode : null,
           address:  payload.address || null,
         },
       });

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, ScrollView, Pressable, TextInput, Animated } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
+import { requireOptionalNativeModule } from 'expo-modules-core';
 import { connect, send } from './services/bridge';
 import { loadSettings } from './services/settings';
 import { startBroadcast, stopBroadcast } from './services/broadcast';
@@ -23,6 +24,53 @@ const DAYS = [
   {d:'Sat',i:'🌦',lo:14,hi:19},{d:'Sun',i:'☀️',lo:16,hi:24},
   {d:'Mon',i:'☀️',lo:17,hi:26},{d:'Tue',i:'🌤',lo:15,hi:24},
 ];
+
+const ExpoBattery = requireOptionalNativeModule('ExpoBattery');
+const BATTERY_STATE_UNPLUGGED = 1;
+const BATTERY_STATE_CHARGING = 2;
+const BATTERY_STATE_FULL = 3;
+
+function batteryStateLabel(state) {
+  if (state === BATTERY_STATE_CHARGING) return 'charging';
+  if (state === BATTERY_STATE_FULL) return 'full';
+  if (state === BATTERY_STATE_UNPLUGGED) return 'unplugged';
+  return 'unknown';
+}
+
+function batteryHealthLabel(level, lowPowerMode) {
+  if (lowPowerMode) return 'power-save';
+  if (typeof level !== 'number') return 'unknown';
+  if (level >= 0.8) return 'excellent';
+  if (level >= 0.55) return 'good';
+  if (level >= 0.3) return 'fair';
+  return 'low';
+}
+
+async function getBatterySnapshot() {
+  if (!ExpoBattery) {
+    return {
+      battery: null,
+      battery_state: 'unavailable',
+      battery_health: 'unavailable',
+      low_power_mode: null,
+    };
+  }
+
+  let level = null;
+  let state = null;
+  let lowPowerMode = null;
+
+  try { level = await ExpoBattery.getBatteryLevelAsync?.(); } catch {}
+  try { state = await ExpoBattery.getBatteryStateAsync?.(); } catch {}
+  try { lowPowerMode = await ExpoBattery.isLowPowerModeEnabledAsync?.(); } catch {}
+
+  return {
+    battery: typeof level === 'number' ? level : null,
+    battery_state: batteryStateLabel(state),
+    battery_health: batteryHealthLabel(level, lowPowerMode),
+    low_power_mode: typeof lowPowerMode === 'boolean' ? lowPowerMode : null,
+  };
+}
 
 // hold-press hook — fires onFire after durationMs, shows progress 0→1
 function useHold(onFire, durationMs = 3000) {
@@ -100,8 +148,20 @@ export default function App() {
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') return;
     locationRef.current = await Location.watchPositionAsync(
-      { timeInterval: 5000, distanceInterval: 5 },
-      (loc) => send({ event_type: 'gps_update', lat: loc.coords.latitude, lng: loc.coords.longitude })
+      { timeInterval: 3000, distanceInterval: 0 },
+      async (loc) => {
+        const battery = await getBatterySnapshot();
+        send({
+          event_type: 'gps_update',
+          lat:      loc.coords.latitude,
+          lng:      loc.coords.longitude,
+          accuracy: loc.coords.accuracy,
+          altitude: loc.coords.altitude,
+          heading:  loc.coords.heading,
+          speed:    loc.coords.speed,
+          ...battery,
+        });
+      }
     );
   }
 

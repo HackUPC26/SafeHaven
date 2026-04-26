@@ -3,12 +3,20 @@
 // host. Override only when running outside the Metro flow (release build, or
 // signaling on a different machine).
 import { NativeModules } from 'react-native'
-import NativeSourceCode from 'react-native/Libraries/NativeModules/specs/NativeSourceCode'
 
 const PORT = '8080'
+const AUTO_SIGNAL_HOST_VALUES = new Set([
+  '',
+  'auto',
+  '<your-mac-lan>',
+  '<your-mac-lan>:8080',
+  'your-mac-lan',
+  'your-mac-lan:8080',
+])
 
 function detectHost () {
-  if (process.env.EXPO_PUBLIC_SIGNAL_HOST) return process.env.EXPO_PUBLIC_SIGNAL_HOST
+  const envHost = normalizeEnvHost(process.env.EXPO_PUBLIC_SIGNAL_HOST)
+  if (envHost) return envHost
 
   const hosts = getDevHostCandidates()
   const host = hosts.find(h => !isLocalhost(h)) ?? hosts[0]
@@ -17,6 +25,15 @@ function detectHost () {
   }
 
   return `localhost:${PORT}`
+}
+
+function normalizeEnvHost (value) {
+  if (typeof value !== 'string') return null
+  const raw = value.trim()
+  if (!raw) return null
+  const canonical = raw.toLowerCase().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '')
+  if (AUTO_SIGNAL_HOST_VALUES.has(canonical)) return null
+  return raw.replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '')
 }
 
 function getDevHostCandidates () {
@@ -46,11 +63,6 @@ function getDevURLCandidates () {
 }
 
 function getScriptURL () {
-  try {
-    const constants = NativeSourceCode?.getConstants?.()
-    if (constants?.scriptURL) return constants.scriptURL
-  } catch {}
-
   const sourceCode = NativeModules?.SourceCode
   if (sourceCode?.scriptURL) return sourceCode.scriptURL
   if (sourceCode?.getConstants) {
