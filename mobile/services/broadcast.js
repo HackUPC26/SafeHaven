@@ -108,9 +108,17 @@ export function getLocalStream() {
 // is lost because it fires synchronously with the React state change.
 export function sendEvent(payload) {
   const msg = JSON.stringify({ type: 'event', payload })
+  const evType = payload?.event_type ?? 'unknown'
   if (s.ws?.readyState === WebSocket.OPEN) {
-    s.ws.send(msg)
-    return true
+    try {
+      s.ws.send(msg)
+      console.log('[broadcast] sent event', evType)
+      return true
+    } catch (err) {
+      // WS reported OPEN but send threw (briefly transitioning to CLOSING).
+      // Fall through to buffering so the event isn't lost.
+      console.warn('[broadcast] ws.send threw, buffering', evType, err?.message ?? err)
+    }
   }
   // Always buffer when the WS isn't open. This catches the synchronous race
   // where escalate() fires sendEvent BEFORE the React effect has a chance to
@@ -118,6 +126,7 @@ export function sendEvent(payload) {
   // change. Capped so an indefinitely-tier-0 session doesn't grow unbounded.
   s.pending.push(msg)
   if (s.pending.length > 100) s.pending.shift()
+  console.log('[broadcast] buffered event', evType, 'wsState=', s.ws?.readyState ?? 'no-ws', 'pending=', s.pending.length)
   return true
 }
 
@@ -141,6 +150,7 @@ function _connect() {
     // briefly between reconnects). This is the path that delivers tier 1's
     // incident_opened to the viewer.
     if (s.pending.length) {
+      console.log('[broadcast] flushing', s.pending.length, 'buffered events')
       for (const msg of s.pending) s.ws.send(msg)
       s.pending = []
     }
