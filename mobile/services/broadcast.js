@@ -81,9 +81,16 @@ export function stopBroadcast() {
 // viewers start receiving video. Idempotent — repeated calls at the same tier
 // are no-ops, and dropping back below T2 (which the monotonic state machine
 // doesn't currently do) intentionally does not stop the camera.
+//
+// IMPORTANT: this is safe to call BEFORE startBroadcast. When called early
+// (s.stream not yet acquired) we just record the tier; startBroadcast's own
+// post-_acquireMedia hook reads s.currentTier and will call _ensureVideo()
+// once the audio stream lands. Without this contract, a direct T0→T2 jump
+// would race: setBroadcastTier(2) runs first, _ensureVideo bails (no stream),
+// and the user ends up with audio-only.
 export async function setBroadcastTier(tier) {
   s.currentTier = tier
-  if (tier >= 2) await _ensureVideo()
+  if (tier >= 2 && s.stream) await _ensureVideo()
 }
 
 export function getLocalStream() {

@@ -119,8 +119,12 @@ export default function App() {
   }
 
   async function startGPS() {
+    // Idempotent — a tier change from 1→2→3 must not stack watchers, since
+    // the [tier] effect fires on every transition.
+    if (locationRef.current) return;
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') return;
+    if (locationRef.current) return; // re-check after the await
     locationRef.current = await Location.watchPositionAsync(
       { timeInterval: 5000, distanceInterval: 5 },
       (loc) => send({ event_type: 'gps_update', lat: loc.coords.latitude, lng: loc.coords.longitude })
@@ -174,14 +178,6 @@ export default function App() {
           {/* silent sent flash */}
           {sent && <View style={styles.sentFlash} />}
 
-          {/* hidden codeword input */}
-          <TextInput
-            style={styles.hiddenInput}
-            value={codewordInput}
-            onChangeText={checkCodeword}
-            placeholder="Search weather..."
-            placeholderTextColor="rgba(255,255,255,0.4)"
-          />
 
           {/* hourly strip */}
           <View style={styles.card}>
