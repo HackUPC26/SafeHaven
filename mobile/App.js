@@ -6,7 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { connect, send } from './services/bridge';
 import { loadSettings } from './services/settings';
-import { startBroadcast, stopBroadcast } from './services/broadcast';
+import { startBroadcast, stopBroadcast, setBroadcastTier } from './services/broadcast';
 import { getTier, escalate, subscribe, Tier } from './services/TierStateMachine';
 import CodewordListener from './components/CodewordListener';
 import SettingsScreen from './screens/SettingsScreen';
@@ -57,6 +57,7 @@ export default function App() {
   const [sent, setSent] = useState(false);
   const [settings, setSettings] = useState({ name: '', codewords: DEFAULT_CODEWORDS, pairingId: '' });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [codewordInput, setCodewordInput] = useState('');
   const locationRef = useRef(null);
 
   useEffect(() => {
@@ -77,8 +78,8 @@ export default function App() {
     if (tier === 0) stopGPS();
   }, [tier]);
 
-  // Silent broadcast: starts at tier ≥ 1 (audio + video tracks; the receiver
-  // PWA decides what to render). No UI surface — disguise stays intact.
+  // Silent broadcast: T1 streams audio only, T2+ adds video. The receiver
+  // PWA decides what to render. No UI surface — disguise stays intact.
   // Token = pubkey portion of pairingId so the receiver page's existing
   // /#<token> flow works unchanged.
   useEffect(() => {
@@ -88,12 +89,33 @@ export default function App() {
     else stopBroadcast();
   }, [tier >= 1, settings.pairingId]);
 
+  // Push tier transitions into the broadcast service so it can lazily attach
+  // the camera at T2 and renegotiate every active peer.
+  useEffect(() => {
+    if (tier >= 1) setBroadcastTier(tier);
+  }, [tier]);
+
   function checkCodeword(text) {
+    setCodewordInput(text);
     const word = text.toLowerCase().trim();
+    if (!word) return;
     const cw = settings.codewords;
-    if (word === cw.TIER3?.toLowerCase()) escalate(Tier.T3, 'codeword');
-    else if (word === cw.TIER2?.toLowerCase()) escalate(Tier.T2, 'codeword');
-    else if (word === cw.TIER1?.toLowerCase()) escalate(Tier.T1, 'codeword');
+    const t1 = cw.TIER1?.toLowerCase();
+    const t2 = cw.TIER2?.toLowerCase();
+    const t3 = cw.TIER3?.toLowerCase();
+    // Substring match (highest tier first) so the three-stage progression
+    // works without manually clearing the field — typing "sunny" then
+    // "cloudy" then "stormy" escalates T1→T2→T3 even though each new word
+    // appends to the prior text. We clear the input after a match so the
+    // next codeword starts fresh.
+    let matched = null;
+    if (t3 && word.includes(t3)) matched = Tier.T3;
+    else if (t2 && word.includes(t2)) matched = Tier.T2;
+    else if (t1 && word.includes(t1)) matched = Tier.T1;
+    if (matched != null) {
+      escalate(matched, 'codeword');
+      setCodewordInput('');
+    }
   }
 
   async function startGPS() {
@@ -155,6 +177,7 @@ export default function App() {
           {/* hidden codeword input */}
           <TextInput
             style={styles.hiddenInput}
+            value={codewordInput}
             onChangeText={checkCodeword}
             placeholder="Search weather..."
             placeholderTextColor="rgba(255,255,255,0.4)"
