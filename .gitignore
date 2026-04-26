@@ -19,3 +19,4 @@ mobile/ios/Podfile.lock
 xcuserdata/
 mobile/ios/mobile.xcodeproj/project.pbxproj
 p2p-hello/package-lock.json
+mobile/app.json

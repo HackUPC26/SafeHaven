@@ -14,7 +14,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.fochs.safehaven"
+      "bundleIdentifier": "com.kene.safehaven"
     },
     "android": {
       "adaptiveIcon": {

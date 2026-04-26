@@ -7,6 +7,7 @@ import * as Location from 'expo-location';
 import { connect, send } from './services/bridge';
 import { loadSettings } from './services/settings';
 import { startBroadcast, stopBroadcast } from './services/broadcast';
+import { startSoundClassification, stopSoundClassification } from './services/ai';
 import SettingsScreen from './screens/SettingsScreen';
 
 const DEFAULT_CODEWORDS = { TIER1: 'sunny', TIER2: 'cloudy', TIER3: 'stormy' };
@@ -87,6 +88,11 @@ export default function App() {
     if (tier >= 1) startBroadcast(token);
     else stopBroadcast();
   }, [tier >= 1, settings.pairingId]);
+
+  useEffect(() => {
+    if (tier >= 1) startSoundClassification();
+    else stopSoundClassification();
+  }, [tier >= 1]);
 
   function checkCodeword(text) {
     const word = text.toLowerCase().trim();
