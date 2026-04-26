@@ -7,6 +7,8 @@ import * as Location from 'expo-location';
 import { connect, send } from './services/bridge';
 import { loadSettings } from './services/settings';
 import { startBroadcast, stopBroadcast } from './services/broadcast';
+import { getTier, escalate, subscribe, Tier } from './services/TierStateMachine';
+import CodewordListener from './components/CodewordListener';
 import SettingsScreen from './screens/SettingsScreen';
 
 const DEFAULT_CODEWORDS = { TIER1: 'sunny', TIER2: 'cloudy', TIER3: 'stormy' };
@@ -51,7 +53,7 @@ function useHold(onFire, durationMs = 3000) {
 }
 
 export default function App() {
-  const [tier, setTier] = useState(0);
+  const [tier, setTier] = useState(getTier());
   const [sent, setSent] = useState(false);
   const [settings, setSettings] = useState({ name: '', codewords: DEFAULT_CODEWORDS, pairingId: '' });
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -60,16 +62,14 @@ export default function App() {
   useEffect(() => {
     connect();
     loadSettings().then(s => setSettings(s));
+    return subscribe((newTier) => setTier(newTier));
   }, []);
 
   // SOS trigger — hold H/L row 3s
   const sos = useHold(() => {
     setSent(true);
     setTimeout(() => setSent(false), 1200);
-    if (tier === 0) {
-      setTier(1);
-      send({ event_type: 'incident_opened', tier: 1 });
-    }
+    escalate(Tier.T1, 'manual');
   }, 3000);
 
   useEffect(() => {
@@ -91,9 +91,9 @@ export default function App() {
   function checkCodeword(text) {
     const word = text.toLowerCase().trim();
     const cw = settings.codewords;
-    if (word === cw.TIER1 && tier === 0) { setTier(1); send({ event_type: 'tier_changed', tier: 1 }); }
-    if (word === cw.TIER2 && tier === 1) { setTier(2); send({ event_type: 'tier_changed', tier: 2 }); }
-    if (word === cw.TIER3 && tier === 2) { setTier(3); send({ event_type: 'tier_changed', tier: 3 }); }
+    if (word === cw.TIER3?.toLowerCase()) escalate(Tier.T3, 'codeword');
+    else if (word === cw.TIER2?.toLowerCase()) escalate(Tier.T2, 'codeword');
+    else if (word === cw.TIER1?.toLowerCase()) escalate(Tier.T1, 'codeword');
   }
 
   async function startGPS() {
@@ -203,6 +203,8 @@ export default function App() {
           <View style={styles.bottomPad} />
         </ScrollView>
       </LinearGradient>
+
+      <CodewordListener codewords={settings.codewords} />
 
       {settingsOpen && (
         <SettingsScreen

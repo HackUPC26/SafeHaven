@@ -53,9 +53,11 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Allow $(PRODUCT_NAME) to access your location</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Allow $(PRODUCT_NAME) to access your microphone</string>
+	<string>SafeHaven uses the microphone to listen for your configured codewords on-device.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>SafeHaven uses on-device speech recognition to detect codewords. Audio is never recorded or sent anywhere.</string>
 	<key>RCTNewArchEnabled</key>
-	<true/>
+	<false/>
 	<key>UILaunchStoryboardName</key>
 	<string>SplashScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>
