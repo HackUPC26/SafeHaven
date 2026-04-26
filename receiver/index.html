@@ -81,12 +81,27 @@ const WAVE_DEL = Array.from({length:44}, (_,i)=> (i * 0.018).toFixed(3));
 
 const AI_LABEL_MAP = {
   SHOUTING:          {label:'Raised voice detected',   eventType:'shout'},
+  SCREAMING:         {label:'Screaming detected',       eventType:'impact'},
   CRYING:            {label:'Crying detected',          eventType:'impact'},
   IMPACT:            {label:'Impact sound detected',   eventType:'impact'},
+  GUNSHOT:           {label:'Gunshot-like sound',       eventType:'impact'},
+  SLAP:              {label:'Slap sound detected',     eventType:'impact'},
+  DOOR_SLAM:         {label:'Door slam detected',      eventType:'impact'},
   GLASS_BREAKING:    {label:'Glass breaking',           eventType:'impact'},
   EXTENDED_SILENCE:  {label:'Extended silence',         eventType:'silence'},
   SPEECH_NORMAL:     {label:'Normal speech',            eventType:'speech'},
 };
+
+const ALERT_AUDIO_LABELS = new Set([
+  'SHOUTING',
+  'SCREAMING',
+  'CRYING',
+  'IMPACT',
+  'GUNSHOT',
+  'SLAP',
+  'DOOR_SLAM',
+  'GLASS_BREAKING',
+]);
 
 function tsToTime(ts) {
   return new Date(ts).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
@@ -162,7 +177,7 @@ function useIncidentState() {
         const mapped = AI_LABEL_MAP[payload.label] || {label: payload.label, eventType:'speech'};
         const conf   = Math.round(payload.confidence * 100);
         setAudioLabels(prev => [{time: tsToTime(ts), eventType: mapped.eventType, label: mapped.label, conf}, ...prev].slice(0, 30));
-        if (['SHOUTING','CRYING','IMPACT','GLASS_BREAKING'].includes(payload.label)) {
+        if (ALERT_AUDIO_LABELS.has(payload.label)) {
           pushLog({ts, label: mapped.label, sub:`AI audio — ${conf}% confidence`, dot: conf >= 85 ? 'red' : 'amber'});
         }
         break;

@@ -1,0 +1,7 @@
+{
+  "name": "safe-haven-ai",
+  "version": "1.0.0",
+  "description": "SafeHaven on-device AI native module",
+  "main": "src/index.js",
+  "private": true
+}
