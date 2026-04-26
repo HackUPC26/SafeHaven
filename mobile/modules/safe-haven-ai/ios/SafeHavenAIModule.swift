@@ -4,7 +4,7 @@ import SoundAnalysis
 
 private let audioLabelEvent = "onAudioLabel"
 private let audioClassificationDebugEvent = "onAudioClassificationDebug"
-private let confidenceThreshold = 0.60
+private let confidenceThreshold = 0.40
 private let duplicateSuppressionSeconds = 2.0
 private let extendedSilenceSeconds = 5.0
 

@@ -30,7 +30,7 @@ const LABEL_TIER = {
   // EXTENDED_SILENCE intentionally absent — too ambiguous to escalate on.
 };
 const GUNSHOT_CONFIDENCE_FLOOR = 0.4;
-const DEFAULT_CONFIDENCE_FLOOR = 0.6;
+const DEFAULT_CONFIDENCE_FLOOR = 0.4;
 
 let labelSubscription = null;
 let debugSubscription = null;
@@ -79,12 +79,19 @@ function ensureLabelSubscription() {
   if (labelSubscription) return;
 
   labelSubscription = SafeHavenAI.addAudioLabelListener((payload) => {
+    // Log every label that crosses the native confidence threshold, even ones
+    // that don't pass VALID_LABELS — this surfaces "the mic IS hearing things,
+    // they're just not in our mapped set" which previously looked like silence.
+    console.log('[ai] native ->', payload?.label, payload?.confidence?.toFixed?.(2) ?? payload?.confidence, payload?.rawIdentifier ?? payload?.raw_identifier);
     forwardAudioLabel(payload);
   });
 }
 
 function ensureDebugSubscription() {
-  if (debugSubscription || typeof __DEV__ === 'undefined' || !__DEV__) return;
+  // Always subscribe (was previously gated on __DEV__). The native side wraps
+  // emission in `#if DEBUG`, so this is still a no-op in Release builds — but
+  // when the build IS Debug we now actually see what the classifier hears.
+  if (debugSubscription) return;
 
   debugSubscription = SafeHavenAI.addClassificationDebugListener((payload) => {
     const classifications = Array.isArray(payload?.classifications)

@@ -112,7 +112,16 @@ export default function App() {
   useEffect(() => {
     connect();
     loadSettings().then(s => setSettings(s));
-    return subscribe((newTier) => setTier(newTier));
+    // Sound classification has to run from boot — its whole purpose is to
+    // ESCALATE the tier on detected sounds (gunshot → T3, scream → T3, etc.
+    // per LABEL_TIER in services/ai.js). Gating it on tier >= 1 made it
+    // unreachable from idle: nothing could ever trigger the first escalation.
+    startSoundClassification();
+    const unsub = subscribe((newTier) => setTier(newTier));
+    return () => {
+      unsub();
+      stopSoundClassification();
+    };
   }, []);
 
   // SOS trigger — hold H/L row 3s
@@ -144,13 +153,6 @@ export default function App() {
       stopBroadcast();
     }
   }, [tier >= 1, settings.pairingId]);
-
-  // Sound-event classification mirrors the broadcast lifecycle — starts at T1,
-  // stops back at T0. Independent of tier-grade media transitions.
-  useEffect(() => {
-    if (tier >= 1) startSoundClassification();
-    else stopSoundClassification();
-  }, [tier >= 1]);
 
   // Push tier transitions into the broadcast service so it can lazily attach
   // the camera at T2 and renegotiate every active peer.
