@@ -19,6 +19,7 @@
 <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js" crossorigin="anonymous"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body,#root{height:100%;overflow:hidden;}
@@ -719,6 +720,15 @@ function App() {
   const {connected, session, tier, gps, trail, audioLabels, incidentLog, videoAnnotation, videoFrozen, staleSecs, elapsed, riskLevel, alertMode, addEntry, setConnected, reset} = useIncidentState();
   const [tab, setTab] = useState('live');
   const [feedFrozen, setFeedFrozen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  async function handleSaveEvidence() {
+    if (saving || !window.saveEvidence) return;
+    setSaving(true);
+    try { await window.saveEvidence(); }
+    catch (err) { console.error('[evidence] save failed:', err); }
+    finally { setSaving(false); }
+  }
   const liveStream = useLiveStream();
   const audioLevels = useAudioLevels(liveStream);
 
@@ -861,8 +871,10 @@ function App() {
           </div>
         </a>
 
-        <div style={{background:'rgba(255,255,255,.04)',borderRadius:14,padding:'12px',textAlign:'center',cursor:'pointer',border:'1px solid rgba(255,255,255,.09)',marginBottom:10}}>
-          <div style={{color:'rgba(255,255,255,.65)',fontSize:14,fontWeight:500}}>💾 Save Evidence Package</div>
+        <div onClick={handleSaveEvidence} style={{background: saving ? 'rgba(59,130,246,.1)' : 'rgba(255,255,255,.04)', borderRadius:14, padding:'12px', textAlign:'center', cursor: saving ? 'wait' : 'pointer', border: saving ? '1px solid rgba(59,130,246,.3)' : '1px solid rgba(255,255,255,.09)', marginBottom:10, opacity: saving ? 0.75 : 1, transition:'all .2s'}}>
+          <div style={{color: saving ? '#93c5fd' : 'rgba(255,255,255,.65)', fontSize:14, fontWeight:500}}>
+            {saving ? '⏳ Packaging evidence…' : '💾 Save Evidence Package'}
+          </div>
         </div>
 
         <div style={{display:'flex',gap:8}}>
@@ -889,6 +901,240 @@ ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 // remaining at this scope is a kill-switch that unregisters any old SW
 // the first time a stale tab loads it.
 
+</script>
+
+<!-- ── Evidence Vault (E8) ────────────────────────────────────────────────────
+     SessionStore  — IndexedDB wrapper (entries store + media blob store).
+     MediaCapture  — wraps MediaRecorder; stores 10-second chunks in IndexedDB.
+     saveEvidence  — builds a ZIP (jszip) from IndexedDB and triggers download.
+
+     All three are plain JS so they run before Babel/React and are available
+     as window globals by the time React mounts and attaches click handlers.
+-->
+<script>
+(function () {
+  // ── SessionStore ────────────────────────────────────────────────────────────
+  const DB_NAME = 'safehaven_session';
+  const DB_VER  = 1;
+  let _db = null;
+
+  const _dbReady = new Promise((resolve, reject) => {
+    try {
+      const req = indexedDB.open(DB_NAME, DB_VER);
+      req.onupgradeneeded = (e) => {
+        const d = e.target.result;
+        if (!d.objectStoreNames.contains('entries')) {
+          d.createObjectStore('entries', { autoIncrement: true });
+        }
+        if (!d.objectStoreNames.contains('media')) {
+          d.createObjectStore('media', { autoIncrement: true });
+        }
+      };
+      req.onsuccess  = (e) => { _db = e.target.result; resolve(_db); };
+      req.onerror    = (e) => { console.warn('[store] open failed:', e.target.error); reject(e.target.error); };
+    } catch (err) {
+      console.warn('[store] indexedDB unavailable:', err);
+      reject(err);
+    }
+  });
+
+  function _idb(req) {
+    return new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror   = () => reject(req.error);
+    });
+  }
+
+  const SessionStore = {
+    ready: _dbReady,
+
+    async putEntry(entry) {
+      await _dbReady;
+      return _idb(_db.transaction('entries', 'readwrite').objectStore('entries').add(entry));
+    },
+
+    async putMedia(blob, type, ts) {
+      await _dbReady;
+      return _idb(_db.transaction('media', 'readwrite').objectStore('media').add({ blob, type, ts, mime: blob.type }));
+    },
+
+    async getAllEntries() {
+      await _dbReady;
+      return _idb(_db.transaction('entries', 'readonly').objectStore('entries').getAll());
+    },
+
+    async getAllMedia() {
+      await _dbReady;
+      return _idb(_db.transaction('media', 'readonly').objectStore('media').getAll());
+    },
+
+    async clear() {
+      await _dbReady;
+      return new Promise((resolve, reject) => {
+        const t = _db.transaction(['entries', 'media'], 'readwrite');
+        t.objectStore('entries').clear();
+        t.objectStore('media').clear();
+        t.oncomplete = resolve;
+        t.onerror    = () => reject(t.error);
+      });
+    },
+  };
+
+  window.safehavenStore = SessionStore;
+
+  // ── MediaCapture ────────────────────────────────────────────────────────────
+  let _recorder = null;
+
+  const MediaCapture = {
+    start(stream) {
+      if (_recorder || !stream || !window.MediaRecorder) return;
+      const types = [
+        'video/webm;codecs=vp8,opus',
+        'video/webm;codecs=vp9,opus',
+        'video/webm',
+        'audio/webm;codecs=opus',
+        'audio/webm',
+      ];
+      const mimeType = types.find(t => MediaRecorder.isTypeSupported(t)) || '';
+      try {
+        _recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+      } catch (err) {
+        console.warn('[capture] MediaRecorder init failed:', err);
+        return;
+      }
+      _recorder.ondataavailable = (e) => {
+        if (!e.data || e.data.size === 0) return;
+        const kind = stream.getVideoTracks().length > 0 ? 'video' : 'audio';
+        SessionStore.putMedia(e.data, kind, Date.now())
+          .catch(err => console.warn('[capture] putMedia failed:', err));
+      };
+      _recorder.start(10000); // 10-second chunks
+      console.log('[capture] recording started, mimeType:', _recorder.mimeType);
+    },
+
+    flush() {
+      if (_recorder && _recorder.state === 'recording') _recorder.requestData();
+    },
+
+    stop() {
+      if (_recorder && _recorder.state !== 'inactive') {
+        _recorder.requestData();
+        _recorder.stop();
+      }
+      _recorder = null;
+    },
+  };
+
+  window.safehavenCapture = MediaCapture;
+
+  // ── Entry + stream hooks ────────────────────────────────────────────────────
+  // Write every entry into IndexedDB as it arrives (before React processes it).
+  // On incident_start, clear the store first so each session starts fresh.
+  window.addEventListener('safehaven:entry', (e) => {
+    const entry = e.detail;
+    if (!entry) return;
+    if (entry.type === 'incident_start') {
+      SessionStore.clear()
+        .then(() => SessionStore.putEntry(entry))
+        .catch(err => console.warn('[store] incident_start clear/put failed:', err));
+    } else {
+      SessionStore.putEntry(entry)
+        .catch(err => console.warn('[store] putEntry failed:', err));
+    }
+  });
+
+  // Start/stop MediaRecorder when the live stream changes.
+  window.addEventListener('safehaven:stream', (e) => {
+    const stream = e.detail;
+    if (stream) MediaCapture.start(stream);
+    else MediaCapture.stop();
+  });
+  // Pick up a stream that arrived before this listener was registered.
+  if (window.__safehavenStream) MediaCapture.start(window.__safehavenStream);
+
+  // ── saveEvidence ────────────────────────────────────────────────────────────
+  // Flushes the current recorder chunk, reads all IndexedDB data, builds a ZIP
+  // (jszip), and triggers a browser download.  Entirely client-side — nothing
+  // leaves the device.
+  window.saveEvidence = async function () {
+    if (!window.JSZip) {
+      alert('ZIP library not loaded — check your internet connection and reload.');
+      return;
+    }
+
+    // Flush the last partial recording chunk and give ondataavailable time to fire.
+    MediaCapture.flush();
+    await new Promise(r => setTimeout(r, 600));
+
+    const [entries, media] = await Promise.all([
+      SessionStore.getAllEntries(),
+      SessionStore.getAllMedia(),
+    ]);
+
+    if (entries.length === 0 && media.length === 0) {
+      alert('No incident data recorded yet.\nStart a session first (or run Simulate SOS).');
+      return;
+    }
+
+    const zip = new JSZip();
+
+    // timeline.ndjson — every raw entry in arrival order
+    zip.file('timeline.ndjson', entries.map(e => JSON.stringify(e)).join('\n'));
+
+    // gps-track.geojson — movement path as a GeoJSON LineString
+    const gpsEntries = entries.filter(e => e.type === 'gps');
+    const sessionStart = entries.find(e => e.type === 'incident_start');
+    const geojson = {
+      type: 'FeatureCollection',
+      features: gpsEntries.length > 0 ? [{
+        type: 'Feature',
+        geometry: {
+          type: 'LineString',
+          coordinates: gpsEntries.map(e => [
+            e.payload.lng,
+            e.payload.lat,
+            e.payload.altitude != null ? e.payload.altitude : 0,
+          ]),
+        },
+        properties: {
+          personName: sessionStart ? sessionStart.payload.personName : 'unknown',
+          startTs:    sessionStart ? sessionStart.ts : null,
+          pointCount: gpsEntries.length,
+        },
+      }] : [],
+    };
+    zip.file('gps-track.geojson', JSON.stringify(geojson, null, 2));
+
+    // ai-labels.ndjson — all AI audio/video annotation entries
+    const aiEntries = entries.filter(e => e.type === 'ai_label' || e.type === 'ai_video_annotation');
+    zip.file('ai-labels.ndjson', aiEntries.map(e => JSON.stringify(e)).join('\n'));
+
+    // media/ — recorded audio/video chunks
+    if (media.length > 0) {
+      const folder = zip.folder('media');
+      let ai = 0, vi = 0;
+      for (const m of media) {
+        const mime = m.mime || '';
+        const ext  = mime.includes('webm') ? 'webm' : mime.includes('mp4') ? 'mp4' : 'bin';
+        const name = m.type === 'video'
+          ? `video-${String(vi++).padStart(3, '0')}.${ext}`
+          : `audio-${String(ai++).padStart(3, '0')}.${ext}`;
+        folder.file(name, m.blob);
+      }
+    }
+
+    const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `safehaven-evidence-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 8000);
+    console.log(`[evidence] exported ${entries.length} entries, ${media.length} media chunks`);
+  };
+})();
 </script>
 
 <!-- ── WebRTC + signaling layer ─────────────────────────────────────────────
