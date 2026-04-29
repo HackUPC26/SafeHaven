@@ -13,6 +13,9 @@ incident timeline, and planned audio/video/AI evidence.
 This README combines the current runnable prototype notes with the BMAD planning
 artifacts in `_bmad-output/planning-artifacts/`.
 
+### Link to Demo Video
+[Video](https://youtube.com/shorts/DvGF6OGmoGA?is=WysinNqFKzdqSK1G)
+
 ## Problem
 
 People in danger often cannot safely call for help.
